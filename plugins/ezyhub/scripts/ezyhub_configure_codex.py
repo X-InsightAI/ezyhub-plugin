@@ -53,25 +53,15 @@ def strip_managed_provider_sections(text: str) -> str:
     return pattern.sub("", text).rstrip() + "\n"
 
 
-def strip_managed_inline_tokens(text: str) -> str:
-    provider_names = "|".join(re.escape(name) for name in MANAGED_PROVIDER_NAMES)
-    section_pattern = re.compile(
-        rf"(?ms)^(\[model_providers\.({provider_names})\]\n)(.*?)(?=^\[[^\n]+\]\n|\Z)"
+def strip_provider_section(text: str, provider_id: str) -> str:
+    pattern = re.compile(
+        rf"(?ms)^\[model_providers\.{re.escape(provider_id)}\]\n.*?(?=^\[[^\n]+\]\n|\Z)"
     )
-    token_pattern = re.compile(r"(?m)^\s*experimental_bearer_token\s*=.*(?:\n|$)")
-
-    def replace(match: re.Match[str]) -> str:
-        header = match.group(1)
-        body = token_pattern.sub("", match.group(3)).rstrip()
-        if body:
-            return header + body + "\n"
-        return header
-
-    return section_pattern.sub(replace, text)
+    return pattern.sub("", text)
 
 
 def _top_level_value(text: str, key: str) -> str | None:
-    m = re.search(rf'(?m)^{re.escape(key)}\s*=\s*"([^"]*)"\s*$', text)
+    m = re.search(rf'(?m)^{re.escape(key)}\s*=\s*"([^"]*)"\s*(?:#.*)?$', text)
     return m.group(1) if m else None
 
 
@@ -84,7 +74,7 @@ def _provider_section(text: str, provider_id: str) -> str | None:
 
 
 def _section_field(section: str, field: str) -> str | None:
-    m = re.search(rf'(?m)^\s*{re.escape(field)}\s*=\s*"([^"]*)"\s*$', section)
+    m = re.search(rf'(?m)^\s*{re.escape(field)}\s*=\s*"([^"]*)"\s*(?:#.*)?$', section)
     return m.group(1) if m else None
 
 
@@ -187,19 +177,8 @@ def remove_previous_ezyhub_auth_key(codex_home: Path, key: str) -> bool:
     return True
 
 
-def strip_nonretained_managed_sections(text: str, keep: str) -> str:
-    others = [n for n in MANAGED_PROVIDER_NAMES if n != keep]
-    if not others:
-        return text
-    names = "|".join(re.escape(n) for n in others)
-    pattern = re.compile(
-        rf"(?ms)^\[model_providers\.({names})\]\n.*?(?=^\[[^\n]+\]\n|\Z)"
-    )
-    return pattern.sub("", text)
-
-
 def merge_features_image_off(text: str) -> str:
-    m = re.search(r"(?ms)^\[features\]\n(.*?)(?=^\[[^\n]+\]\n|\Z)", text)
+    m = re.search(r"(?ms)^\[features\][ \t]*(?:#[^\n]*)?\n(.*?)(?=^\[[^\n]+\]\n|\Z)", text)
     if m is None:
         block = "[features]\nimage_generation = false\n"
         return text.rstrip() + "\n\n" + block
@@ -211,13 +190,19 @@ def merge_features_image_off(text: str) -> str:
     return text[: m.start(1)] + body + text[m.end(1):]
 
 
+def toml_escape_basic(value: str) -> str:
+    if any(char in value for char in "\r\n"):
+        raise ValueError("TOML string values cannot contain newlines")
+    return value.replace("\\", "\\\\").replace('"', '\\"')
+
+
 def _render_provider(provider_id: str, base_url: str, key: str) -> str:
     return (
         f"\n\n[model_providers.{provider_id}]\n"
         f'name = "EzyHub"\n'
         f'base_url = "{base_url.rstrip("/")}"\n'
         f'wire_api = "responses"\n'
-        f'experimental_bearer_token = "{key}"\n'
+        f'experimental_bearer_token = "{toml_escape_basic(key)}"\n'
         f"requires_openai_auth = true\n"
     )
 
@@ -247,6 +232,9 @@ def merge_config(codex_home: Path, base_url: str, model: str, key: str) -> Path:
         _atomic_write(backup, text)
     provider_id = select_retained_provider(text)
     text = strip_managed_provider_sections(text)  # drop ALL managed sections; we re-add the retained one clean
+    # The retained id may be foreign (owned via name/base_url, e.g. "work"); its old
+    # section must also go so the freshly rendered table below is the only one.
+    text = strip_provider_section(text, provider_id)
     text = set_top_level_string(text, "model_provider", provider_id)
     text = set_top_level_string(text, "model", model)
     text = merge_features_image_off(text)

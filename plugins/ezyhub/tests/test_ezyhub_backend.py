@@ -1069,6 +1069,25 @@ def test_read_codex_key_falls_back_to_inline_token(tmp_path, monkeypatch):
     assert helper.read_codex_key() == "sk-ezyhub-inline2"
 
 
+def test_read_codex_key_never_forwards_foreign_inline_token(tmp_path, monkeypatch):
+    helper = load_helper()
+    home = tmp_path / "codex"
+    home.mkdir()
+    # Active provider is NOT EzyHub-owned (foreign id, foreign name, foreign base_url):
+    # its inline bearer token is a third-party secret and must never be sent to the backend.
+    (home / "config.toml").write_text(
+        'model_provider = "openai"\n'
+        "[model_providers.openai]\n"
+        'name = "OpenAI"\n'
+        'base_url = "https://api.openai.com/v1"\n'
+        'experimental_bearer_token = "sk-foreign-inline"\n'
+    )
+    (home / "auth.json").write_text(json.dumps({"OPENAI_API_KEY": "sk-ezyhub-legacy"}), encoding="utf-8")
+    monkeypatch.setattr(helper, "codex_home", lambda: home)
+    monkeypatch.delenv("EZYHUB_CODEX_KEY", raising=False)
+    assert helper.read_codex_key() == "sk-ezyhub-legacy"
+
+
 def test_codex_app_config_status_reports_missing_without_reading_key(tmp_path, monkeypatch):
     helper = load_helper()
     codex_home = tmp_path / "codex-home"
@@ -1763,6 +1782,102 @@ def test_merge_config_idempotent(tmp_path):
     assert second.count('[model_providers.ezyhub]') == 1
     assert second.count('image_generation = false') == 1
     assert second.count('requires_openai_auth = true') == 1
+
+
+def test_merge_config_dedupes_foreign_retained_provider_section(tmp_path):
+    import tomllib
+
+    configure = load_configure_helper()
+    home = tmp_path / "codex"
+    _write(home / "config.toml",
+        'model_provider = "work"\n'
+        'model = "gpt-5.6-sol"\n\n'
+        '[model_providers.work]\n'
+        'name = "EzyHub"\n'
+        'base_url = "https://api.ezyapis.com/v1"\n'
+        'wire_api = "responses"\n'
+        'env_key = "EZYHUB_CODEX_KEY"\n'
+    )
+    configure.merge_config(home, "https://api.ezyapis.com/v1", "gpt-5.6-sol", "sk-ezyhub-w-1")
+    text = (home / "config.toml").read_text()
+    assert 'model_provider = "work"' in text               # retained, not renamed
+    assert text.count("[model_providers.work]") == 1       # no duplicate table
+    assert "env_key" not in text                           # stale line gone
+    parsed = tomllib.loads(text)
+    assert parsed["model_providers"]["work"]["experimental_bearer_token"] == "sk-ezyhub-w-1"
+
+
+def test_merge_config_dedupes_foreign_id_owned_by_gateway_baseurl(tmp_path):
+    import tomllib
+
+    configure = load_configure_helper()
+    home = tmp_path / "codex"
+    _write(home / "config.toml",
+        'model_provider = "work"\n\n'
+        '[model_providers.work]\n'
+        'name = "Work Gateway"\n'
+        'base_url = "https://api.ezyapis.com/v1/"\n'
+    )
+    configure.merge_config(home, "https://api.ezyapis.com/v1", "gpt-5.6-sol", "sk-ezyhub-w-2")
+    text = (home / "config.toml").read_text()
+    assert 'model_provider = "work"' in text
+    assert text.count("[model_providers.work]") == 1
+    tomllib.loads(text)
+
+
+def test_merge_config_features_header_with_trailing_comment(tmp_path):
+    import tomllib
+
+    configure = load_configure_helper()
+    home = tmp_path / "codex"
+    _write(home / "config.toml",
+        "[features] # flags\n"
+        "web_search = true\n"
+    )
+    configure.merge_config(home, "https://api.ezyapis.com/v1", "gpt-5.6-sol", "sk-ezyhub-f-1")
+    text = (home / "config.toml").read_text()
+    assert text.count("[features]") == 1
+    assert "image_generation = false" in text
+    assert "web_search = true" in text
+    tomllib.loads(text)
+
+
+def test_merge_config_retains_provider_despite_trailing_comments(tmp_path):
+    configure = load_configure_helper()
+    home = tmp_path / "codex"
+    _write(home / "config.toml",
+        'model_provider = "ezyapis" # company gateway\n\n'
+        '[model_providers.ezyapis]\n'
+        'name = "EzyHub"\n'
+        'base_url = "https://api.ezyapis.com/v1" # gateway\n'
+        'wire_api = "responses"\n'
+    )
+    configure.merge_config(home, "https://api.ezyapis.com/v1", "gpt-5.6-sol", "sk-ezyhub-c-1")
+    text = (home / "config.toml").read_text()
+    assert 'model_provider = "ezyapis"' in text            # retained, NOT migrated to ezyhub
+    assert "[model_providers.ezyhub]" not in text
+
+
+def test_select_retained_provider_tolerates_trailing_comment_on_foreign_id(tmp_path):
+    configure = load_configure_helper()
+    text = (
+        'model_provider = "work" # gateway\n\n'
+        "[model_providers.work]\n"
+        'name = "EzyHub" # ours\n'
+    )
+    assert configure.select_retained_provider(text) == "work"
+
+
+def test_merge_config_toml_escapes_inline_token(tmp_path):
+    import tomllib
+
+    configure = load_configure_helper()
+    home = tmp_path / "codex"
+    tricky_key = 'sk-ezyhub-qu"ote\\slash'
+    configure.merge_config(home, "https://api.ezyapis.com/v1", "gpt-5.6-sol", tricky_key)
+    text = (home / "config.toml").read_text()
+    parsed = tomllib.loads(text)
+    assert parsed["model_providers"]["ezyhub"]["experimental_bearer_token"] == tricky_key
 
 
 def test_key_rotate_configures_new_key_with_fixed_model(monkeypatch):

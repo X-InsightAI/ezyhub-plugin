@@ -83,19 +83,23 @@ def read_codex_key() -> str:
     value = os.environ.get(CODEX_CLIENT_KEY_ENV, "").strip() or env_values.get(CODEX_CLIENT_KEY_ENV, "").strip()
     if value:
         return value
-    # 2. active provider inline experimental_bearer_token
+    # 2. active provider inline experimental_bearer_token (only when the active
+    #    provider is EzyHub-owned; a foreign provider's token is a third-party
+    #    secret and must never be forwarded to the EzyHub backend)
     config_path = home / "config.toml"
     if config_path.exists():
         try:
-            config_payload = parse_codex_config_strings(config_path.read_text(encoding="utf-8"))
+            config_text = config_path.read_text(encoding="utf-8")
+            config_payload = parse_codex_config_strings(config_text)
             providers = config_payload.get("model_providers")
             providers = providers if isinstance(providers, dict) else {}
             model_provider = config_payload.get("model_provider")
-            active = providers.get(model_provider) if isinstance(model_provider, str) else None
-            if isinstance(active, dict):
-                token = active.get("experimental_bearer_token")
-                if isinstance(token, str) and token.strip():
-                    return token.strip()
+            if ezyhub_owned_active_provider(config_text, model_provider):
+                active = providers.get(model_provider) if isinstance(model_provider, str) else None
+                if isinstance(active, dict):
+                    token = active.get("experimental_bearer_token")
+                    if isinstance(token, str) and token.strip():
+                        return token.strip()
         except Exception:
             pass
     # 3. legacy auth.json OPENAI_API_KEY

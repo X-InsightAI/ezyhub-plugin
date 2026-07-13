@@ -14,11 +14,12 @@ import json
 import os
 import re
 import sys
+import time
 from pathlib import Path
 
 
 DEFAULT_BASE_URL = "https://api.ezyapis.com/v1"
-DEFAULT_MODEL = "gpt-5.5"
+DEFAULT_MODEL = "gpt-5.6-sol"
 ENV_FILE_NAME = ".env"
 CODEX_KEY_ENV_VAR = "EZYHUB_CODEX_KEY"
 PROVIDER_NAME = "ezyhub"
@@ -67,6 +68,41 @@ def strip_managed_inline_tokens(text: str) -> str:
         return header
 
     return section_pattern.sub(replace, text)
+
+
+def _top_level_value(text: str, key: str) -> str | None:
+    m = re.search(rf'(?m)^{re.escape(key)}\s*=\s*"([^"]*)"\s*$', text)
+    return m.group(1) if m else None
+
+
+def _provider_section(text: str, provider_id: str) -> str | None:
+    m = re.search(
+        rf"(?ms)^\[model_providers\.{re.escape(provider_id)}\]\n(.*?)(?=^\[[^\n]+\]\n|\Z)",
+        text,
+    )
+    return m.group(1) if m else None
+
+
+def _section_field(section: str, field: str) -> str | None:
+    m = re.search(rf'(?m)^\s*{re.escape(field)}\s*=\s*"([^"]*)"\s*$', section)
+    return m.group(1) if m else None
+
+
+def select_retained_provider(text: str) -> str:
+    active = _top_level_value(text, "model_provider")
+    if not active:
+        return PROVIDER_NAME
+    if active in MANAGED_PROVIDER_NAMES:
+        return active
+    section = _provider_section(text, active)
+    if section is None:
+        return PROVIDER_NAME
+    if _section_field(section, "name") == "EzyHub":
+        return active
+    base = _section_field(section, "base_url")
+    if base and base.rstrip("/") == DEFAULT_BASE_URL.rstrip("/"):
+        return active
+    return PROVIDER_NAME
 
 
 def set_top_level_string(text: str, key: str, value: str) -> str:
@@ -151,23 +187,71 @@ def remove_previous_ezyhub_auth_key(codex_home: Path, key: str) -> bool:
     return True
 
 
-def merge_config(codex_home: Path, base_url: str, model: str) -> Path:
-    config_path = codex_home / "config.toml"
-    text = config_path.read_text() if config_path.exists() else ""
-    text = strip_managed_inline_tokens(text)
-    text = strip_managed_provider_sections(text)
-    text = set_top_level_string(text, "model_provider", PROVIDER_NAME)
-    text = set_top_level_string(text, "model", model)
-    provider = f"""
+def strip_nonretained_managed_sections(text: str, keep: str) -> str:
+    others = [n for n in MANAGED_PROVIDER_NAMES if n != keep]
+    if not others:
+        return text
+    names = "|".join(re.escape(n) for n in others)
+    pattern = re.compile(
+        rf"(?ms)^\[model_providers\.({names})\]\n.*?(?=^\[[^\n]+\]\n|\Z)"
+    )
+    return pattern.sub("", text)
 
-[model_providers.{PROVIDER_NAME}]
-name = "EzyHub"
-base_url = "{base_url.rstrip('/')}"
-wire_api = "responses"
-env_key = "{CODEX_KEY_ENV_VAR}"
-"""
-    config_path.parent.mkdir(parents=True, exist_ok=True)
-    config_path.write_text(text.rstrip() + provider, encoding="utf-8")
+
+def merge_features_image_off(text: str) -> str:
+    m = re.search(r"(?ms)^\[features\]\n(.*?)(?=^\[[^\n]+\]\n|\Z)", text)
+    if m is None:
+        block = "[features]\nimage_generation = false\n"
+        return text.rstrip() + "\n\n" + block
+    body = m.group(1)
+    if re.search(r"(?m)^\s*image_generation\s*=", body):
+        body = re.sub(r"(?m)^\s*image_generation\s*=.*$", "image_generation = false", body, count=1)
+    else:
+        body = body.rstrip() + "\nimage_generation = false\n"
+    return text[: m.start(1)] + body + text[m.end(1):]
+
+
+def _render_provider(provider_id: str, base_url: str, key: str) -> str:
+    return (
+        f"\n\n[model_providers.{provider_id}]\n"
+        f'name = "EzyHub"\n'
+        f'base_url = "{base_url.rstrip("/")}"\n'
+        f'wire_api = "responses"\n'
+        f'experimental_bearer_token = "{key}"\n'
+        f"requires_openai_auth = true\n"
+    )
+
+
+def _atomic_write(path: Path, text: str) -> None:
+    path.parent.mkdir(parents=True, exist_ok=True)
+    tmp = path.with_name(path.name + ".tmp")
+    old_umask = os.umask(0o177)
+    try:
+        tmp.write_text(text, encoding="utf-8")
+        os.replace(tmp, path)
+    finally:
+        os.umask(old_umask)
+    try:
+        path.chmod(0o600)
+    except PermissionError:
+        pass
+
+
+def merge_config(codex_home: Path, base_url: str, model: str, key: str) -> Path:
+    config_path = codex_home / "config.toml"
+    text = config_path.read_text(encoding="utf-8") if config_path.exists() else ""
+    if config_path.exists():
+        backup = config_path.with_name(
+            config_path.name + ".ezyhub-bak-" + time.strftime("%Y%m%dT%H%M%SZ", time.gmtime())
+        )
+        _atomic_write(backup, text)
+    provider_id = select_retained_provider(text)
+    text = strip_managed_provider_sections(text)  # drop ALL managed sections; we re-add the retained one clean
+    text = set_top_level_string(text, "model_provider", provider_id)
+    text = set_top_level_string(text, "model", model)
+    text = merge_features_image_off(text)
+    text = text.rstrip() + _render_provider(provider_id, base_url, key)
+    _atomic_write(config_path, text.rstrip() + "\n")
     return config_path
 
 
@@ -189,12 +273,12 @@ def main() -> int:
         key = resolve_key(args)
         env_path = write_codex_env_key(codex_home, key)
         removed_auth_key = remove_previous_ezyhub_auth_key(codex_home, key)
-        config_path = merge_config(codex_home, args.base_url, args.model)
+        config_path = merge_config(codex_home, args.base_url, args.model, key)
     except Exception as exc:
         print(f"error: {exc}", file=sys.stderr)
         return 1
 
-    print(f"Configured Codex provider '{PROVIDER_NAME}' in {config_path}")
+    print(f"Configured EzyHub mixed-auth provider in {config_path}")
     print(f"Stored EzyHub key in {env_path} as {CODEX_KEY_ENV_VAR} (hidden).")
     if removed_auth_key:
         print("Removed previous EzyHub OPENAI_API_KEY from Codex auth.json.")

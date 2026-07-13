@@ -6,6 +6,7 @@ from __future__ import annotations
 import argparse
 import base64
 import getpass
+import importlib.util
 import json
 import os
 import re
@@ -40,6 +41,7 @@ SCHTASKS_TASK_NAME = "EzyHubCodexAutoSync"
 
 SECTION_RE = re.compile(r"^\s*\[([A-Za-z0-9_.-]+)\]\s*(?:#.*)?$")
 STRING_VALUE_RE = re.compile(r'^\s*([A-Za-z0-9_.-]+)\s*=\s*"((?:[^"\\]|\\.)*)"\s*(?:#.*)?$')
+BOOL_VALUE_RE = re.compile(r"^\s*([A-Za-z0-9_.-]+)\s*=\s*(true|false)\s*(?:#.*)?$")
 
 
 def codex_home() -> Path:
@@ -77,7 +79,11 @@ def codex_env_values(home: Path | None = None) -> dict[str, str]:
 def read_codex_key() -> str:
     home = codex_home()
     env_values = codex_env_values(home)
-    configured_env_names = [CODEX_CLIENT_KEY_ENV]
+    # 1. EZYHUB_CODEX_KEY (process env then CODEX_HOME/.env)
+    value = os.environ.get(CODEX_CLIENT_KEY_ENV, "").strip() or env_values.get(CODEX_CLIENT_KEY_ENV, "").strip()
+    if value:
+        return value
+    # 2. active provider inline experimental_bearer_token
     config_path = home / "config.toml"
     if config_path.exists():
         try:
@@ -85,24 +91,22 @@ def read_codex_key() -> str:
             providers = config_payload.get("model_providers")
             providers = providers if isinstance(providers, dict) else {}
             model_provider = config_payload.get("model_provider")
-            active_provider = providers.get(model_provider) if isinstance(model_provider, str) else None
-            if isinstance(active_provider, dict) and isinstance(active_provider.get("env_key"), str):
-                configured_env_names.insert(0, active_provider["env_key"])
+            active = providers.get(model_provider) if isinstance(model_provider, str) else None
+            if isinstance(active, dict):
+                token = active.get("experimental_bearer_token")
+                if isinstance(token, str) and token.strip():
+                    return token.strip()
         except Exception:
             pass
-    for name in dict.fromkeys(configured_env_names):
-        value = os.environ.get(name, "").strip() or env_values.get(name, "").strip()
-        if value:
-            return value
-
-    auth_path = codex_home() / "auth.json"
+    # 3. legacy auth.json OPENAI_API_KEY
+    auth_path = home / "auth.json"
     try:
         payload = json.loads(auth_path.read_text())
     except FileNotFoundError as exc:
-        raise RuntimeError("Codex auth.json not found; run /enroll first") from exc
+        raise RuntimeError("EzyHub key not found; run /enroll first") from exc
     key = payload.get("OPENAI_API_KEY")
     if not isinstance(key, str) or not key:
-        raise RuntimeError("Codex API key not found; run /enroll first")
+        raise RuntimeError("EzyHub key not found; run /enroll first")
     return key
 
 
@@ -146,6 +150,27 @@ def request_json_url(url: str) -> dict[str, Any]:
     except urllib.error.HTTPError as exc:
         detail = exc.read().decode(errors="replace")
         raise RuntimeError(f"GET {url} failed: HTTP {exc.code} {detail}") from exc
+
+
+def load_configure_codex_module():
+    script = Path(__file__).with_name("ezyhub_configure_codex.py")
+    spec = importlib.util.spec_from_file_location("_ezyhub_configure_codex", script)
+    if spec is None or spec.loader is None:
+        raise RuntimeError(f"cannot load {script}")
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    return module
+
+
+def ezyhub_owned_active_provider(config_text: str, model_provider: Any) -> bool:
+    """True when the active model_provider is EzyHub-owned (managed id, name EzyHub, or gateway base_url)."""
+    if not isinstance(model_provider, str) or not model_provider:
+        return False
+    try:
+        configure = load_configure_codex_module()
+        return configure.select_retained_provider(config_text) == model_provider
+    except Exception:
+        return False
 
 
 def configure_codex_with_key(key: str, base_url: str, model: str) -> None:
@@ -671,6 +696,11 @@ def parse_codex_config_strings(text: str) -> dict[str, Any]:
             key, value = value_match.groups()
             # Enough TOML string unescaping for values written by our helper.
             current[key] = bytes(value, "utf-8").decode("unicode_escape")
+            continue
+        bool_match = BOOL_VALUE_RE.match(line)
+        if bool_match:
+            key, value = bool_match.groups()
+            current[key] = value == "true"
     return root
 
 
@@ -681,10 +711,12 @@ def codex_app_config_status(*, expected_base_url: str, expected_model: str) -> d
     env_path = home / CODEX_ENV_FILE_NAME
     env_values = codex_env_values(home)
     config_payload: dict[str, Any] = {}
+    config_text = ""
     config_error: str | None = None
     if config_path.exists():
         try:
-            config_payload = parse_codex_config_strings(config_path.read_text(encoding="utf-8"))
+            config_text = config_path.read_text(encoding="utf-8")
+            config_payload = parse_codex_config_strings(config_text)
         except Exception as exc:
             config_error = str(exc)
 
@@ -693,13 +725,20 @@ def codex_app_config_status(*, expected_base_url: str, expected_model: str) -> d
     model_provider = config_payload.get("model_provider")
     active_provider = providers.get(model_provider) if isinstance(model_provider, str) else None
     active_provider = active_provider if isinstance(active_provider, dict) else {}
+    features = config_payload.get("features")
+    features = features if isinstance(features, dict) else {}
 
     auth_configured = False
+    chatgpt_login = False
     auth_error: str | None = None
     if auth_path.exists():
         try:
             auth_payload = json.loads(auth_path.read_text(encoding="utf-8"))
             auth_configured = bool(auth_payload.get("OPENAI_API_KEY"))
+            account = auth_payload.get("account")
+            chatgpt_login = bool(auth_payload.get("tokens")) or (
+                isinstance(account, dict) and account.get("type") == "chatgpt"
+            )
         except Exception as exc:
             auth_error = str(exc)
 
@@ -718,14 +757,16 @@ def codex_app_config_status(*, expected_base_url: str, expected_model: str) -> d
         expected_base_url,
         DEFAULT_PUBLIC_GATEWAY_BASE_URL.rstrip("/"),
     }
-    preferred_provider_name = model_provider == EZYHUB_PROVIDER_NAME
+    ezyhub_owned = ezyhub_owned_active_provider(config_text, model_provider)
     provider_configured = bool(active_provider)
     credential_configured = auth_configured or inline_token_configured or env_key_configured
     base_url_configured = isinstance(base_url, str) and base_url.rstrip("/") in accepted_base_urls
+    requires_openai_auth = active_provider.get("requires_openai_auth") is True
+    image_generation_off = features.get("image_generation") is False
     ready = bool(
         config_path.exists()
         and credential_configured
-        and preferred_provider_name
+        and ezyhub_owned
         and provider_configured
         and base_url_configured
         and wire_api == "responses"
@@ -740,7 +781,7 @@ def codex_app_config_status(*, expected_base_url: str, expected_model: str) -> d
         missing.append(f"{CODEX_ENV_FILE_NAME}:{env_key_name or CODEX_CLIENT_KEY_ENV} or auth.json")
     if not credential_configured:
         missing.append("provider.env_key/.env, provider.experimental_bearer_token, or auth.OPENAI_API_KEY")
-    if not preferred_provider_name:
+    if not ezyhub_owned:
         missing.append(f"model_provider={EZYHUB_PROVIDER_NAME}")
     if not provider_configured:
         missing.append(f"model_providers.{model_provider or EZYHUB_PROVIDER_NAME}")
@@ -771,7 +812,7 @@ def codex_app_config_status(*, expected_base_url: str, expected_model: str) -> d
             "auth_api_key": auth_configured,
             "provider_experimental_bearer_token": inline_token_configured,
             "credential": credential_configured,
-            "model_provider_ezyhub_gateway": preferred_provider_name,
+            "model_provider_ezyhub_gateway": ezyhub_owned,
             "active_provider": provider_configured,
             "active_provider_base_url": base_url_configured,
             "active_provider_wire_api_responses": wire_api == "responses",
@@ -785,6 +826,11 @@ def codex_app_config_status(*, expected_base_url: str, expected_model: str) -> d
             "active_provider_env_key": env_key_name,
             "env_file_has_active_provider_key": bool(env_key_name and env_key_name in env_values),
             "active_provider_has_inline_token": inline_token_configured,
+            "provider_id_retained": model_provider if ezyhub_owned and isinstance(model_provider, str) else None,
+            "requires_openai_auth": requires_openai_auth,
+            "inline_token_present": inline_token_configured,
+            "chatgpt_login": chatgpt_login,
+            "image_generation_off": image_generation_off,
         },
         "missing": sorted(set(missing)),
         "errors": {
@@ -1214,7 +1260,7 @@ def parse_args() -> argparse.Namespace:
     configure_client_key.add_argument("--key-file")
     configure_client_key.add_argument("--prompt-key", action="store_true")
     configure_client_key.add_argument("--base-url", default=DEFAULT_GATEWAY_BASE_URL)
-    configure_client_key.add_argument("--model", default="gpt-5.5")
+    configure_client_key.add_argument("--model", default="gpt-5.6-sol")
     sub.add_parser("clear-codex-app-kb-token")
     sub.add_parser("codex-app-kb-token-status")
 
@@ -1226,15 +1272,15 @@ def parse_args() -> argparse.Namespace:
 
     app_config = sub.add_parser("codex-app-config-status")
     app_config.add_argument("--base-url", default=DEFAULT_GATEWAY_BASE_URL)
-    app_config.add_argument("--model", default="gpt-5.5")
+    app_config.add_argument("--model", default="gpt-5.6-sol")
 
     rotate = sub.add_parser("key-rotate")
     rotate.add_argument("--base-url", default=DEFAULT_GATEWAY_BASE_URL)
-    rotate.add_argument("--model", default="gpt-5.5")
+    rotate.add_argument("--model", default="gpt-5.6-sol")
 
     enroll = sub.add_parser("enroll-backend")
     enroll.add_argument("--base-url", default=DEFAULT_GATEWAY_BASE_URL)
-    enroll.add_argument("--model", default="gpt-5.5")
+    enroll.add_argument("--model", default="gpt-5.6-sol")
     enroll.add_argument("--dev-complete", action="store_true")
     enroll.add_argument("--dev-google-sub", default="dev-user")
     enroll.add_argument("--dev-google-email", default="dev@example.com")

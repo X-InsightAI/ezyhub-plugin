@@ -4,6 +4,7 @@ import argparse
 import base64
 import importlib.util
 import json
+import sys
 from pathlib import Path
 
 
@@ -709,7 +710,7 @@ def test_enroll_backend_dev_complete_lets_backend_issue_key(monkeypatch):
         poll_timeout_seconds=1,
         poll_interval_seconds=0,
         base_url="https://api.ezyapis.com/v1",
-        model="gpt-5.5",
+        model="gpt-5.6-sol",
         skip_sync_skills=True,
         skip_auto_sync=True,
         auto_sync_interval_hours=4,
@@ -725,7 +726,7 @@ def test_enroll_backend_dev_complete_lets_backend_issue_key(monkeypatch):
         "name": "Dev User",
         "role": "engineering",
     }
-    assert configured == [("sk-issued-by-backend", "https://api.ezyapis.com/v1", "gpt-5.5")]
+    assert configured == [("sk-issued-by-backend", "https://api.ezyapis.com/v1", "gpt-5.6-sol")]
 
 
 def test_enroll_backend_one_shot_chain(monkeypatch, capsys):
@@ -746,7 +747,7 @@ def test_enroll_backend_one_shot_chain(monkeypatch, capsys):
     args = argparse.Namespace(
         backend_url="https://b", no_open_browser=True, dev_complete=False,
         poll_timeout_seconds=1, poll_interval_seconds=0.01,
-        base_url="https://gw/v1", model="gpt-5.5",
+        base_url="https://gw/v1", model="gpt-5.6-sol",
         skip_sync_skills=False, skip_auto_sync=False, auto_sync_interval_hours=4,
     )
     helper.cmd_enroll_backend(args)
@@ -770,7 +771,7 @@ def test_enroll_backend_prints_resume_command_on_sync_failure(monkeypatch, capsy
     args = argparse.Namespace(
         backend_url="https://b", no_open_browser=True, dev_complete=False,
         poll_timeout_seconds=1, poll_interval_seconds=0.01,
-        base_url="https://gw/v1", model="gpt-5.5",
+        base_url="https://gw/v1", model="gpt-5.6-sol",
         skip_sync_skills=False, skip_auto_sync=False, auto_sync_interval_hours=4,
     )
     with pytest.raises(RuntimeError):
@@ -827,11 +828,11 @@ def test_configure_codex_app_client_key_uses_env_without_printing_key(monkeypatc
             key_file=None,
             prompt_key=False,
             base_url="http://gateway/v1",
-            model="gpt-5.5",
+            model="gpt-5.6-sol",
         )
     )
 
-    assert calls == [("sk-client-secret", "http://gateway/v1", "gpt-5.5")]
+    assert calls == [("sk-client-secret", "http://gateway/v1", "gpt-5.6-sol")]
     assert "sk-client-secret" not in capsys.readouterr().out
 
 
@@ -847,7 +848,7 @@ def test_configure_codex_writes_env_key_and_removes_ezyhub_auth_key(tmp_path):
         "\n".join(
             [
                 'model_provider = "ezyapis"',
-                'model = "gpt-5.5"',
+                'model = "gpt-5.6-sol"',
                 "",
                 "[model_providers.ezyapis]",
                 'name = "ezyapis"',
@@ -860,17 +861,19 @@ def test_configure_codex_writes_env_key_and_removes_ezyhub_auth_key(tmp_path):
     )
 
     env_path = configure.write_codex_env_key(codex_home, "sk-ezyhub-new")
-    config_path = configure.merge_config(codex_home, "https://api.ezyapis.com/v1", "gpt-5.5")
+    config_path = configure.merge_config(codex_home, "https://api.ezyapis.com/v1", "gpt-5.6-sol", "sk-ezyhub-new")
     removed = configure.remove_previous_ezyhub_auth_key(codex_home, "sk-ezyhub-new")
 
     assert env_path.read_text(encoding="utf-8") == "EZYHUB_CODEX_KEY=sk-ezyhub-new\n"
     config_text = config_path.read_text(encoding="utf-8")
-    assert 'model_provider = "ezyhub"' in config_text
-    assert "[model_providers.ezyhub]" in config_text
-    assert 'env_key = "EZYHUB_CODEX_KEY"' in config_text
+    # provider "ezyapis" is retained (base_url matches the company gateway)
+    assert 'model_provider = "ezyapis"' in config_text
+    assert "[model_providers.ezyapis]" in config_text
     assert "[model_providers.company]" not in config_text
-    assert "[model_providers.ezyapis]" not in config_text
-    assert "experimental_bearer_token" not in config_text
+    assert "[model_providers.ezyhub]" not in config_text
+    assert 'experimental_bearer_token = "sk-ezyhub-new"' in config_text
+    assert 'requires_openai_auth = true' in config_text
+    assert "env_key" not in config_text
     assert "sk-ezyhub-inline-old" not in config_text
     assert removed is True
     auth_payload = json.loads((codex_home / "auth.json").read_text(encoding="utf-8"))
@@ -885,7 +888,7 @@ def test_codex_app_config_status_reports_ready_without_printing_key(tmp_path, mo
         '\n'.join(
             [
                 'model_provider = "ezyhub"',
-                'model = "gpt-5.5"',
+                'model = "gpt-5.6-sol"',
                 "",
                 "[model_providers.ezyhub]",
                 'name = "EzyHub"',
@@ -900,7 +903,7 @@ def test_codex_app_config_status_reports_ready_without_printing_key(tmp_path, mo
 
     payload = helper.codex_app_config_status(
         expected_base_url="http://gateway/v1",
-        expected_model="gpt-5.5",
+        expected_model="gpt-5.6-sol",
     )
 
     assert payload["ready"] is True
@@ -908,7 +911,45 @@ def test_codex_app_config_status_reports_ready_without_printing_key(tmp_path, mo
     assert "sk-client-secret" not in json.dumps(payload)
 
 
-def test_codex_app_config_status_reports_legacy_ezyapis_inline_token_not_ready(tmp_path, monkeypatch):
+def test_status_ready_for_retained_ezyapis_inline_token(tmp_path, monkeypatch):
+    helper = load_helper()
+    home = tmp_path / "codex"
+    home.mkdir()
+    (home / "config.toml").write_text(
+        'model_provider = "ezyapis"\n'
+        'model = "gpt-5.6-sol"\n'
+        '[features]\n'
+        'image_generation = false\n'
+        '[model_providers.ezyapis]\n'
+        'name = "EzyHub"\n'
+        'base_url = "https://api.ezyapis.com/v1"\n'
+        'wire_api = "responses"\n'
+        'experimental_bearer_token = "sk-ezyhub-secret"\n'
+        'requires_openai_auth = true\n',
+        encoding="utf-8",
+    )
+    (home / "auth.json").write_text(
+        '{"tokens": {"access_token": "x"}, "account": {"type": "chatgpt"}}',
+        encoding="utf-8",
+    )
+    monkeypatch.setattr(helper, "codex_home", lambda: home)
+
+    status = helper.codex_app_config_status(
+        expected_base_url="https://api.ezyapis.com/v1",
+        expected_model="gpt-5.6-sol",
+    )
+
+    assert status["ready"] is True
+    assert status["missing"] == []
+    assert status["observed"]["provider_id_retained"] == "ezyapis"
+    assert status["observed"]["requires_openai_auth"] is True
+    assert status["observed"]["inline_token_present"] is True
+    assert status["observed"]["chatgpt_login"] is True
+    assert status["observed"]["image_generation_off"] is True
+    assert "sk-ezyhub-secret" not in json.dumps(status)
+
+
+def test_codex_app_config_status_reports_legacy_ezyapis_inline_token_ready(tmp_path, monkeypatch):
     helper = load_helper()
     codex_home = tmp_path / "codex-home"
     codex_home.mkdir()
@@ -916,7 +957,7 @@ def test_codex_app_config_status_reports_legacy_ezyapis_inline_token_not_ready(t
         "\n".join(
             [
                 'model_provider = "ezyapis"',
-                'model = "gpt-5.5"',
+                'model = "gpt-5.6-sol"',
                 "",
                 "[model_providers.ezyapis]",
                 'name = "ezyapis"',
@@ -931,12 +972,15 @@ def test_codex_app_config_status_reports_legacy_ezyapis_inline_token_not_ready(t
 
     payload = helper.codex_app_config_status(
         expected_base_url="http://gateway/v1",
-        expected_model="gpt-5.5",
+        expected_model="gpt-5.6-sol",
     )
 
-    assert payload["ready"] is False
-    assert "model_provider=ezyhub" in payload["missing"]
+    # "ezyapis" is an EzyHub-managed provider id pointed at the company gateway,
+    # so a retained inline-token config now counts as ready (mixed-auth).
+    assert payload["ready"] is True
+    assert payload["missing"] == []
     assert payload["configured"]["provider_experimental_bearer_token"] is True
+    assert payload["observed"]["provider_id_retained"] == "ezyapis"
     assert "sk-cliproxy-secret" not in json.dumps(payload)
 
 
@@ -948,7 +992,7 @@ def test_codex_app_config_status_accepts_provider_env_key(tmp_path, monkeypatch)
         "\n".join(
             [
                 'model_provider = "ezyhub"',
-                'model = "gpt-5.5"',
+                'model = "gpt-5.6-sol"',
                 "",
                 "[model_providers.ezyhub]",
                 'name = "EzyHub"',
@@ -965,7 +1009,7 @@ def test_codex_app_config_status_accepts_provider_env_key(tmp_path, monkeypatch)
 
     payload = helper.codex_app_config_status(
         expected_base_url="http://gateway/v1",
-        expected_model="gpt-5.5",
+        expected_model="gpt-5.6-sol",
     )
 
     assert payload["ready"] is True
@@ -998,6 +1042,33 @@ def test_read_codex_key_prefers_codex_env_file(tmp_path, monkeypatch):
     assert helper.read_codex_key() == "sk-env-file-key"
 
 
+def test_read_codex_key_prefers_env_file_over_inline(tmp_path, monkeypatch):
+    helper = load_helper()
+    home = tmp_path / "codex"
+    home.mkdir()
+    (home / ".env").write_text('EZYHUB_CODEX_KEY=sk-ezyhub-fromenv\n')
+    (home / "config.toml").write_text(
+        'model_provider = "ezyapis"\n[model_providers.ezyapis]\n'
+        'experimental_bearer_token = "sk-ezyhub-inline"\n'
+    )
+    monkeypatch.setattr(helper, "codex_home", lambda: home)
+    monkeypatch.delenv("EZYHUB_CODEX_KEY", raising=False)
+    assert helper.read_codex_key() == "sk-ezyhub-fromenv"
+
+
+def test_read_codex_key_falls_back_to_inline_token(tmp_path, monkeypatch):
+    helper = load_helper()
+    home = tmp_path / "codex"
+    home.mkdir()
+    (home / "config.toml").write_text(
+        'model_provider = "company"\n[model_providers.company]\n'
+        'experimental_bearer_token = "sk-ezyhub-inline2"\n'
+    )
+    monkeypatch.setattr(helper, "codex_home", lambda: home)
+    monkeypatch.delenv("EZYHUB_CODEX_KEY", raising=False)
+    assert helper.read_codex_key() == "sk-ezyhub-inline2"
+
+
 def test_codex_app_config_status_reports_missing_without_reading_key(tmp_path, monkeypatch):
     helper = load_helper()
     codex_home = tmp_path / "codex-home"
@@ -1007,7 +1078,7 @@ def test_codex_app_config_status_reports_missing_without_reading_key(tmp_path, m
 
     payload = helper.codex_app_config_status(
         expected_base_url="http://gateway/v1",
-        expected_model="gpt-5.5",
+        expected_model="gpt-5.6-sol",
     )
 
     assert payload["ready"] is False
@@ -1557,3 +1628,173 @@ def test_publish_skill_local_reader_rejects_symlinks_and_oversize(tmp_path, monk
         helper.cmd_publish_skill(
             argparse.Namespace(backend_url="http://backend", dir=str(tmp_path / "ezyhub-missing"), role="engineering", name=None)
         )
+
+
+def test_select_retained_provider_keeps_ezyapis(tmp_path):
+    configure = load_configure_helper()
+    text = (
+        'model_provider = "ezyapis"\n\n'
+        '[model_providers.ezyapis]\n'
+        'name = "EzyHub"\n'
+        'base_url = "https://api.ezyapis.com/v1"\n'
+        'wire_api = "responses"\n'
+    )
+    assert configure.select_retained_provider(text) == "ezyapis"
+
+
+def test_select_retained_provider_keeps_company_by_baseurl(tmp_path):
+    configure = load_configure_helper()
+    text = (
+        'model_provider = "company"\n\n'
+        '[model_providers.company]\n'
+        'base_url = "https://api.ezyapis.com/v1/"\n'
+    )
+    assert configure.select_retained_provider(text) == "company"
+
+
+def test_select_retained_provider_new_install_defaults_ezyhub(tmp_path):
+    configure = load_configure_helper()
+    assert configure.select_retained_provider("") == "ezyhub"
+
+
+def test_select_retained_provider_ignores_foreign_active_provider(tmp_path):
+    configure = load_configure_helper()
+    text = (
+        'model_provider = "openai"\n\n'
+        '[model_providers.openai]\n'
+        'name = "OpenAI"\n'
+        'base_url = "https://api.openai.com/v1"\n'
+    )
+    assert configure.select_retained_provider(text) == "ezyhub"
+
+
+def _write(p, s):
+    p.parent.mkdir(parents=True, exist_ok=True)
+    p.write_text(s, encoding="utf-8")
+
+
+def test_merge_config_retains_ezyapis_inline_token_no_env_key(tmp_path):
+    configure = load_configure_helper()
+    home = tmp_path / "codex"
+    _write(home / "config.toml",
+        'model_provider = "ezyapis"\n'
+        'model = "gpt-5.6-sol"\n\n'
+        '[model_providers.ezyapis]\n'
+        'name = "EzyHub"\n'
+        'base_url = "https://api.ezyapis.com/v1"\n'
+        'wire_api = "responses"\n'
+        'env_key = "EZYHUB_CODEX_KEY"\n'
+    )
+    configure.merge_config(home, "https://api.ezyapis.com/v1", "gpt-5.6-sol", "sk-ezyhub-jane-XYZ")
+    text = (home / "config.toml").read_text()
+    assert 'model_provider = "ezyapis"' in text          # retained, not renamed
+    assert '[model_providers.ezyapis]' in text
+    assert '[model_providers.ezyhub]' not in text
+    assert 'experimental_bearer_token = "sk-ezyhub-jane-XYZ"' in text
+    assert 'requires_openai_auth = true' in text
+    # env_key removed from the active provider section
+    active = text.split('[model_providers.ezyapis]')[1].split('[')[0]
+    assert 'env_key' not in active
+    assert 'image_generation = false' in text
+    assert 'model = "gpt-5.6-sol"' in text
+
+
+def test_merge_config_new_install_uses_ezyhub(tmp_path):
+    configure = load_configure_helper()
+    home = tmp_path / "codex"
+    configure.merge_config(home, "https://api.ezyapis.com/v1", "gpt-5.6-sol", "sk-ezyhub-new-1")
+    text = (home / "config.toml").read_text()
+    assert 'model_provider = "ezyhub"' in text
+    assert '[model_providers.ezyhub]' in text
+    assert 'experimental_bearer_token = "sk-ezyhub-new-1"' in text
+    assert 'requires_openai_auth = true' in text
+    assert 'wire_api = "responses"' in text
+
+
+def test_merge_config_preserves_unrelated_and_backs_up(tmp_path):
+    configure = load_configure_helper()
+    home = tmp_path / "codex"
+    _write(home / "config.toml",
+        'model_provider = "ezyhub"\n'
+        '[features]\n'
+        'web_search = true\n\n'
+        '[mcp_servers.personal]\n'
+        'url = "http://localhost:9/mcp"\n\n'
+        '[model_providers.ezyhub]\n'
+        'name = "EzyHub"\n'
+        'base_url = "https://api.ezyapis.com/v1"\n'
+        'wire_api = "responses"\n'
+    )
+    configure.merge_config(home, "https://api.ezyapis.com/v1", "gpt-5.6-sol", "sk-ezyhub-2")
+    text = (home / "config.toml").read_text()
+    assert '[mcp_servers.personal]' in text            # untouched
+    assert 'web_search = true' in text                 # other feature flag kept
+    assert 'image_generation = false' in text          # merged in
+    backups = list(home.glob("config.toml.ezyhub-bak-*"))
+    assert len(backups) == 1                            # timestamped backup created
+
+
+def test_merge_config_backup_is_0600(tmp_path):
+    configure = load_configure_helper()
+    home = tmp_path / "codex"
+    _write(home / "config.toml",
+        'model_provider = "ezyapis"\n'
+        '[model_providers.ezyapis]\n'
+        'name = "EzyHub"\n'
+        'base_url = "https://api.ezyapis.com/v1"\n'
+        'wire_api = "responses"\n'
+        'experimental_bearer_token = "sk-ezyhub-prev-live"\n'
+    )
+    configure.merge_config(home, "https://api.ezyapis.com/v1", "gpt-5.6-sol", "sk-ezyhub-4")
+    backups = list(home.glob("config.toml.ezyhub-bak-*"))
+    assert len(backups) == 1
+    # backup holds the OLD config (a live inline token) -> must never be world/group readable
+    assert (backups[0].stat().st_mode & 0o777) == 0o600
+
+
+def test_merge_config_idempotent(tmp_path):
+    configure = load_configure_helper()
+    home = tmp_path / "codex"
+    configure.merge_config(home, "https://api.ezyapis.com/v1", "gpt-5.6-sol", "sk-ezyhub-3")
+    first = (home / "config.toml").read_text()
+    configure.merge_config(home, "https://api.ezyapis.com/v1", "gpt-5.6-sol", "sk-ezyhub-3")
+    second = (home / "config.toml").read_text()
+    # no duplicate provider/features sections on a second run
+    assert second.count('[model_providers.ezyhub]') == 1
+    assert second.count('image_generation = false') == 1
+    assert second.count('requires_openai_auth = true') == 1
+
+
+def test_key_rotate_configures_new_key_with_fixed_model(monkeypatch):
+    helper = load_helper()
+    seen: dict = {}
+    rotate_calls: list[tuple[str, str, str | None]] = []
+
+    def fake_request_json(method, path, **kwargs):
+        rotate_calls.append((method, path, kwargs.get("token")))
+        return {"key": "sk-ezyhub-new"}
+
+    monkeypatch.setattr(helper, "read_codex_key", lambda: "sk-ezyhub-old")
+    monkeypatch.setattr(helper, "request_json", fake_request_json)
+    monkeypatch.setattr(
+        helper,
+        "configure_codex_with_key",
+        lambda key, base_url, model: seen.update(key=key, base_url=base_url, model=model),
+    )
+
+    helper.cmd_key_rotate(
+        argparse.Namespace(backend_url="https://b", base_url="https://api.ezyapis.com/v1", model="gpt-5.6-sol")
+    )
+
+    # old key travels as bearer token (never in the URL path)
+    assert rotate_calls == [("POST", "/keys/rotate", "sk-ezyhub-old")]
+    # new key flows through the mixed-auth configure path (inline token + .env)
+    assert seen == {"key": "sk-ezyhub-new", "base_url": "https://api.ezyapis.com/v1", "model": "gpt-5.6-sol"}
+
+
+def test_key_rotate_parser_defaults_to_gpt_56_sol(monkeypatch):
+    helper = load_helper()
+    monkeypatch.setattr(sys, "argv", ["ezyhub_backend.py", "key-rotate"])
+    args = helper.parse_args()
+    assert args.model == "gpt-5.6-sol"
+    assert args.base_url == helper.DEFAULT_GATEWAY_BASE_URL

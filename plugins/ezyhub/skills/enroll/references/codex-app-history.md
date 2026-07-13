@@ -9,30 +9,37 @@ real employee keys, OAuth secrets, management keys, refresh tokens, or copied
 
 - The plugin is for Codex App first. Explain enrollment, restart behavior,
   provider selection, and local config in Codex App terms.
-- The provider identity is `ezyhub`.
+- The provider id is retained from the existing config when it is
+  EzyHub-managed (`ezyhub`, `company`, or `ezyapis`) or already points at the
+  EzyHub gateway; new configs default to `ezyhub`.
 - The model gateway base URL is `https://api.ezyapis.com/v1`.
 - Employee/plugin defaults must use domains, not IP addresses.
-- The default model used during local validation was `gpt-5.5`.
-- The employee key belongs in `CODEX_HOME/.env` as `EZYHUB_CODEX_KEY`.
-- `config.toml` should point `[model_providers.ezyhub].env_key` at
-  `EZYHUB_CODEX_KEY`.
+- The default model is `gpt-5.6-sol`.
+- The employee key is the model bearer as an inline `experimental_bearer_token`
+  in the retained provider section; no `env_key` line is written there. The key
+  is also stored in `CODEX_HOME/.env` as `EZYHUB_CODEX_KEY` for helper
+  commands.
+- The retained provider section sets `requires_openai_auth = true`, and
+  `[features]` sets `image_generation = false`.
 - `auth.json` is still the OpenAI/ChatGPT login state. Do not delete it, and do
-  not remove OpenAI login tokens while configuring the EzyHub provider.
+  not remove OpenAI login tokens while configuring the EzyHub provider — the
+  mixed-auth setup depends on that login staying in place.
 
-## Provider migration record
+## Provider identity record
 
 The earlier implementation used names such as `company` and `ezyapis` for the
-local Codex provider. The chosen provider name is now `ezyhub`. Future enroll and
-rotation flows must migrate local runtime state away from old managed provider
-sections:
+local Codex provider, and a later pass mandated migrating everything to
+`ezyhub` with `env_key`. The current decision is mixed-auth with a retained
+provider id. Enroll and rotation flows:
 
-- `[model_providers.company]`
-- `[model_providers.ezyapis]`
-- inline `experimental_bearer_token` values under those managed sections
+- keep the existing EzyHub-managed provider id and rewrite its section clean
+  with the inline `experimental_bearer_token` and `requires_openai_auth = true`
+- remove the other managed sections (`company`, `ezyapis`, `ezyhub` — whichever
+  are not the retained id)
+- do not write `env_key` in the managed provider section
 
 Keep `https://api.ezyapis.com/v1` unchanged. That string is the public API host,
-not the provider identity. EzyHub-owned skills or scripts that read
-`[model_providers.ezyapis]` should be updated to read `[model_providers.ezyhub]`.
+not the provider identity.
 
 ## Backend key ownership
 
@@ -75,6 +82,6 @@ not the provider identity. EzyHub-owned skills or scripts that read
 - After changing provider config, key material, plugin skills, or MCP tools,
   start a new Codex App thread.
 - If the new thread still sees stale plugin or provider state, quit and reopen
-  Codex App.
+  Codex App. A machine reboot is not required.
 - Do not claim a change is active until the installed plugin cache and a new
   Codex App thread can see it.

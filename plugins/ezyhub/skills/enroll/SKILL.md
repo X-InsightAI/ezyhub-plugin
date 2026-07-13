@@ -27,7 +27,7 @@ On Windows, use `python` instead of `python3` if that is the available launcher.
 
 What happens after the browser step completes:
 
-1. Codex provider/key are configured (see "Provider migration" below).
+1. Codex provider/key are configured (see "Mixed-auth provider config" below).
 2. Role skills and the EzyHub KB MCP server config are synced (same as `/sync-skills`; see `plugins/ezyhub/skills/sync-skills/SKILL.md` for collision rules). Skip with `--skip-sync-skills`.
 3. A background job is installed that re-runs the sync automatically, default every 4 hours. Skip with `--skip-auto-sync`, change the interval with `--auto-sync-interval-hours <n>`.
 
@@ -47,41 +47,51 @@ python3 plugins/ezyhub/scripts/ezyhub_backend.py enroll-backend --dev-complete
 
 This exercises the same enroll session/result path that production Google OAuth will use, but completes the session with a local dev identity. It still runs the full chain above (config, skill/MCP sync, auto-sync install). The key must be issued by the key backend. If `CLIPROXY_MANAGEMENT_KEY` is configured on key-backend, the backend generates a fresh CLIProxyAPI client key and adds it to CLIProxyAPI through the management API. Do not read an existing client key from WSL or any other local Codex client.
 
-## Provider migration
+## Mixed-auth provider config
 
-Enrollment must always configure the provider as `ezyhub`, not `company` or
-`ezyapis`. The public gateway base URL remains `https://api.ezyapis.com/v1`.
+Enrollment is mixed-auth: the employee's OpenAI/ChatGPT login stays, and the
+EzyHub key becomes the model bearer as an inline `experimental_bearer_token`
+on the provider section. The public gateway base URL remains
+`https://api.ezyapis.com/v1`.
 
-Required local Codex shape:
+The provider id is retained, not migrated: if the active provider is already
+EzyHub-managed (`ezyhub`, `company`, or `ezyapis`) or points at the EzyHub
+gateway, enrollment keeps that id and rewrites its section clean; only when no
+such provider exists does it create `ezyhub`.
+
+Resulting local Codex shape (shown with a retained `ezyapis` id):
 
 ```toml
-model_provider = "ezyhub"
+model_provider = "ezyapis"
+model = "gpt-5.6-sol"
 
-[model_providers.ezyhub]
+[features]
+image_generation = false
+
+[model_providers.ezyapis]
 name = "EzyHub"
 base_url = "https://api.ezyapis.com/v1"
 wire_api = "responses"
-env_key = "EZYHUB_CODEX_KEY"
+experimental_bearer_token = "<employee key>"
+requires_openai_auth = true
 ```
 
-Store the employee CLIProxyAPI key in `CODEX_HOME/.env` as `EZYHUB_CODEX_KEY`.
-Do not store the EzyHub key in `auth.json`, and do not remove the user's
-OpenAI/ChatGPT login tokens from `auth.json`. It is valid for Codex App to stay
-logged in to OpenAI while the active model provider is `ezyhub`.
+The employee key is also stored in `CODEX_HOME/.env` as `EZYHUB_CODEX_KEY` for
+helper commands; the managed provider section carries the inline token and no
+`env_key` line. Do not store the EzyHub key in `auth.json`, and do not remove
+the user's OpenAI/ChatGPT login tokens from `auth.json` — `requires_openai_auth
+= true` depends on that login staying in place.
 
-When configuring Codex, migrate old managed runtime state:
+When configuring Codex, the helper:
 
-- remove or replace `[model_providers.company]`
-- remove or replace `[model_providers.ezyapis]`
-- remove old inline `experimental_bearer_token` values under those managed
-  provider sections
-- leave unrelated providers, MCP servers, and MCP `bearer_token_env_var`
+- keeps the retained provider id and rewrites its section clean (dropping any
+  old `env_key` or stale inline token lines)
+- removes the other managed provider sections (`company`, `ezyapis`, `ezyhub`
+  — whichever are not the retained id)
+- sets `model = "gpt-5.6-sol"` and `image_generation = false` under
+  `[features]`
+- leaves unrelated providers, MCP servers, and MCP `bearer_token_env_var`
   settings alone
-
-If an EzyHub-owned local skill or script still reads `[model_providers.ezyapis]`
-or uses the provider name `ezyapis`, update it to `ezyhub`. Keep the domain
-`api.ezyapis.com` unchanged; that is the public gateway host, not the provider
-identity.
 
 ## Production path
 
@@ -95,4 +105,5 @@ Google identity verification is owned by the EzyHub app, not by key-backend dire
 
 The long-lived CLIProxyAPI key must never appear in browser URLs or logs.
 Open a new Codex App thread after enrollment. If the new thread still sees stale
-skills, tools, or provider config, quit and reopen Codex App.
+skills, tools, or provider config, quit and reopen Codex App. No reboot is
+required.

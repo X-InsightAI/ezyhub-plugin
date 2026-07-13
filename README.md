@@ -36,7 +36,7 @@ You are installing a company plugin on an employee machine. Follow these steps e
 
 **Step 1 — Prerequisites**
 
-Check that the `codex` CLI is available (`codex --version`) and that `git` and Python 3.11+ are on PATH. If `codex` is missing, stop and tell the user to install Codex App first.
+Check that the `codex` CLI is available (`codex --version`) and that `git` and Python 3.11+ are on PATH. On Windows the CLI ships inside Codex App and is usually **not** on PATH — use the newest version directory under `%LOCALAPPDATA%\OpenAI\Codex\bin\<version>\codex.exe` and call it by full path. Only if Codex App itself is not installed, stop and tell the user to install it first.
 
 **Step 2 — Install the plugin**
 

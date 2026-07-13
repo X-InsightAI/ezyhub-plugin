@@ -1,7 +1,7 @@
 {
-  "name": "ezytrail",
+  "name": "ezyhub",
   "interface": {
-    "displayName": "EzyTrail"
+    "displayName": "EzyHub"
   },
   "plugins": [
     {

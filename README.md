@@ -1,6 +1,6 @@
-# EzyTrail Codex Plugins
+# EzyHub Codex Plugin
 
-Company plugin marketplace for [Codex App](https://openai.com/codex). Ships the **ezyhub** plugin, which connects your Codex App to the EzyTrail company platform:
+Company plugin marketplace for [Codex App](https://openai.com/codex). Ships the **ezyhub** plugin, which connects your Codex App to the EzyHub company platform:
 
 - **Company model gateway** — enroll once, get a personal gateway key issued and managed by the company control plane
 - **Role-based skills** — company skills for your role, synced automatically and kept up to date
@@ -18,7 +18,7 @@ The agent installs the plugin and runs enrollment. Your only manual step is sign
 
 ```bash
 codex plugin marketplace add https://github.com/X-InsightAI/ezyhub-plugin
-codex plugin add ezyhub@ezytrail
+codex plugin add ezyhub@ezyhub
 ```
 
 Then open a new Codex thread and run `/enroll`.
@@ -42,7 +42,7 @@ Check that the `codex` CLI is available (`codex --version`) and that `git` and P
 
 ```bash
 codex plugin marketplace add https://github.com/X-InsightAI/ezyhub-plugin
-codex plugin add ezyhub@ezytrail
+codex plugin add ezyhub@ezyhub
 ```
 
 **Step 3 — Enroll**
@@ -50,8 +50,8 @@ codex plugin add ezyhub@ezytrail
 Clone this repository to a persistent location and run the one-shot enroll helper from the clone. Do not use a temporary directory: the auto-sync job installed at the end keeps running the helper from this path.
 
 ```bash
-git clone --depth 1 https://github.com/X-InsightAI/ezyhub-plugin ~/.ezytrail/ezyhub-plugin
-cd ~/.ezytrail/ezyhub-plugin
+git clone --depth 1 https://github.com/X-InsightAI/ezyhub-plugin ~/.ezyhub/ezyhub-plugin
+cd ~/.ezyhub/ezyhub-plugin
 python3 plugins/ezyhub/scripts/ezyhub_backend.py enroll-backend
 ```
 
@@ -86,7 +86,7 @@ Once installed, these skills are available in Codex App:
 ## Updating
 
 ```bash
-codex plugin add ezyhub@ezytrail
+codex plugin add ezyhub@ezyhub
 ```
 
 Then open a new Codex thread. Role skills also refresh automatically in the background (default: every 4 hours).
@@ -96,4 +96,4 @@ Then open a new Codex thread. Role skills also refresh automatically in the back
 - Your gateway key is issued by the company control plane during `/enroll` and stored only on your device (in `CODEX_HOME/.env`). This repository contains no secrets.
 - Company skills are synced under the `ezyhub-` prefix and never touch your personal skills.
 - Role-based skill content is served per-role by the company backend — it is not stored in this repository.
-- Managed by the EzyTrail platform team. The source of truth for skills and backend services lives in a private repository.
+- Managed by the EzyHub platform team. The source of truth for skills and backend services lives in a private repository.

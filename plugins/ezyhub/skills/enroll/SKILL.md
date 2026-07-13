@@ -84,6 +84,10 @@ the user's OpenAI/ChatGPT login tokens from `auth.json` — `requires_openai_aut
 
 When configuring Codex, the helper:
 
+- **first backs up the existing `config.toml`** to
+  `config.toml.ezyhub-bak-<UTC-timestamp>` (mode 0600) before any change, and
+  writes the new config atomically — the employee's original config is always
+  recoverable
 - keeps the retained provider id and rewrites its section clean (dropping any
   old `env_key` or stale inline token lines)
 - removes the other managed provider sections (`company`, `ezyapis`, `ezyhub`
@@ -92,6 +96,12 @@ When configuring Codex, the helper:
   `[features]`
 - leaves unrelated providers, MCP servers, and MCP `bearer_token_env_var`
   settings alone
+
+Hard rule for anything touching `config.toml`: only add or replace the
+EzyHub-owned pieces listed above. Never delete or rewrite configuration the
+employee already has (their providers, MCP servers, feature flags, comments).
+Never hand-edit `config.toml` — always go through the helper script, which
+enforces the backup and the surgical write.
 
 ## Production path
 

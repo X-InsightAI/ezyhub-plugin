@@ -4,6 +4,7 @@
 from __future__ import annotations
 
 import argparse
+import base64
 import getpass
 import json
 import os
@@ -275,9 +276,9 @@ def cmd_status(args: argparse.Namespace) -> None:
     print("Key: configured (hidden)")
 
 
-def load_manifest(skills_dir: Path) -> dict[str, list[str]]:
+def load_manifest(skills_dir: Path) -> dict[str, Any]:
     path = skills_dir / MANIFEST_NAME
-    empty = {"managed": [], "mcp_servers": []}
+    empty: dict[str, Any] = {"managed": [], "mcp_servers": [], "managed_files": {}}
     if not path.exists():
         return empty
     try:
@@ -286,15 +287,34 @@ def load_manifest(skills_dir: Path) -> dict[str, list[str]]:
         return empty
     if not isinstance(payload, dict):
         return empty
-    return {
-        "managed": [n for n in payload.get("managed", []) if isinstance(n, str)],
-        "mcp_servers": [n for n in payload.get("mcp_servers", []) if isinstance(n, str)],
-    }
+    managed = [n for n in payload.get("managed", []) if isinstance(n, str)]
+    raw_files = payload.get("managed_files")
+    managed_files: dict[str, list[str]] = {}
+    if isinstance(raw_files, dict):
+        for name, paths in raw_files.items():
+            if isinstance(name, str) and isinstance(paths, list):
+                managed_files[name] = [p for p in paths if isinstance(p, str)]
+    for name in managed:
+        managed_files.setdefault(name, [])
+    return {"managed": managed, "mcp_servers": [n for n in payload.get("mcp_servers", []) if isinstance(n, str)], "managed_files": managed_files}
 
 
-def write_manifest(skills_dir: Path, names: list[str], mcp_names: list[str] | None = None) -> None:
+def write_manifest(
+    skills_dir: Path,
+    names: list[str],
+    mcp_names: list[str] | None = None,
+    managed_files: dict[str, list[str]] | None = None,
+) -> None:
     (skills_dir / MANIFEST_NAME).write_text(
-        json.dumps({"managed": sorted(names), "mcp_servers": sorted(mcp_names or [])}, indent=2) + "\n",
+        json.dumps(
+            {
+                "managed": sorted(names),
+                "mcp_servers": sorted(mcp_names or []),
+                "managed_files": {name: sorted(paths) for name, paths in sorted((managed_files or {}).items())},
+            },
+            indent=2,
+        )
+        + "\n",
         encoding="utf-8",
     )
 
@@ -373,6 +393,187 @@ def apply_mcp_servers(home: Path, servers: list[dict[str, Any]], previous: set[s
     return sorted(current)
 
 
+# Bundle caps and path validation mirror the key backend's skillfs module (kept
+# inline because this helper is stdlib-only and must not import backend code).
+BUNDLE_MAX_FILES = 20
+BUNDLE_MAX_BYTES = 5 * 1024 * 1024
+FILE_MAX_BYTES = 1 * 1024 * 1024
+# Managed skill dir names: used by both the write gate and the removal loop.
+COMPANY_SKILL_NAME_RE = re.compile(r"ezyhub-[A-Za-z0-9._-]+")
+
+
+def validate_rel_path(path: str) -> None:
+    if not path or path.startswith("/"):
+        raise ValueError(f"invalid path: {path!r}")
+    parts = path.replace("\\", "/").split("/")
+    if any(p in ("", ".", "..") for p in parts):
+        raise ValueError(f"invalid path segment in: {path!r}")
+    normalized = os.path.normpath(path)
+    if normalized.startswith("..") or os.path.isabs(normalized):
+        raise ValueError(f"escaping path: {path!r}")
+
+
+def decode_bundle_file(f: dict) -> tuple[str, bytes]:
+    path = f.get("path")
+    if not isinstance(path, str):
+        raise ValueError("file missing path")
+    validate_rel_path(path)
+    enc = f.get("encoding", "utf-8")
+    content = f.get("content", "")
+    if enc == "base64":
+        data = base64.b64decode(content)
+    elif enc == "utf-8":
+        data = content.encode("utf-8")
+    else:
+        raise ValueError(f"unknown encoding: {enc}")
+    if len(data) > FILE_MAX_BYTES:
+        raise ValueError(f"file exceeds size cap: {path}")
+    return path, data
+
+
+def _is_binary(data: bytes) -> bool:
+    if b"\x00" in data:
+        return True
+    try:
+        data.decode("utf-8")
+        return False
+    except UnicodeDecodeError:
+        return True
+
+
+def read_local_skill_tree(skill_dir: Path) -> list[dict]:
+    """Read a local skill directory into a bundle payload.
+
+    Mirrors the backend's skillfs.read_skill_bundle safety: rejects symlinks and
+    traversal-shaped relative paths, and enforces the same file/byte caps, so an
+    unsafe tree is refused locally before anything is uploaded.
+    """
+    files: list[dict] = []
+    total = 0
+    for p in sorted(skill_dir.rglob("*")):
+        rel = p.relative_to(skill_dir).as_posix()
+        if p.is_symlink():
+            raise ValueError(f"symlink not allowed in bundle: {rel}")
+        if not p.is_file():
+            continue
+        validate_rel_path(rel)
+        data = p.read_bytes()
+        if len(data) > FILE_MAX_BYTES:
+            raise ValueError(f"file exceeds size cap: {rel}")
+        total += len(data)
+        if len(files) >= BUNDLE_MAX_FILES or total > BUNDLE_MAX_BYTES:
+            raise ValueError("bundle exceeds file/byte cap")
+        if _is_binary(data):
+            files.append({"path": rel, "content": base64.b64encode(data).decode("ascii"), "encoding": "base64"})
+        else:
+            files.append({"path": rel, "content": data.decode("utf-8"), "encoding": "utf-8"})
+    if not files:
+        raise ValueError(f"skill directory has no files: {skill_dir}")
+    return files
+
+
+def cmd_publish_skill(args: argparse.Namespace) -> None:
+    skill_dir = Path(args.dir).expanduser()
+    if not skill_dir.is_dir():
+        raise RuntimeError(f"skill directory does not exist: {skill_dir}")
+    name = args.name or skill_dir.resolve().name
+    if not name.startswith(COMPANY_SKILL_PREFIX):
+        raise RuntimeError(
+            f"skill name must start with {COMPANY_SKILL_PREFIX}: {name!r} (pass --name {COMPANY_SKILL_PREFIX}<slug>)"
+        )
+    files = read_local_skill_tree(skill_dir)
+    payload = request_json(
+        "POST",
+        "/skills/submit",
+        backend_url=args.backend_url,
+        token=read_codex_key(),
+        body={"skill_name": name, "target_role": args.role, "files": files},
+    )
+    submission_id = payload.get("submission_id")
+    if not isinstance(submission_id, str) or not submission_id:
+        raise RuntimeError("backend did not return a submission id")
+    print(f"Submitted skill {name} ({len(files)} file(s)) for role {args.role}.")
+    print(f"Submission id: {submission_id}")
+    print("An EzyHub admin must approve the submission before it appears in the role's skills.")
+
+
+def _resolves_within(skill_dir: Path, rel: str) -> bool:
+    """True only if skill_dir/rel resolves to a path still inside skill_dir.
+
+    Defense-in-depth against a symlinked intermediate dir (e.g. an employee makes
+    ``ezyhub-x/scripts`` a symlink to ``~/project``): realpath follows every symlink
+    component, so a redirected write/delete target lands outside and is refused.
+    """
+    root = os.path.realpath(skill_dir)
+    target = os.path.realpath(skill_dir / rel)
+    return target == root or target.startswith(root + os.sep)
+
+
+def write_bundle_files(skill_dir: Path, files: list[dict]) -> list[str]:
+    """Write a server skill bundle under skill_dir; return the relative paths written.
+
+    Unlike the backend's skillfs (which rmtree's the whole dir), this never deletes:
+    files the employee added under skill_dir are left alone. Stale managed files are
+    removed separately, driven by the manifest's managed_files tracking.
+    """
+    if len(files) > BUNDLE_MAX_FILES:
+        raise ValueError("too many files in bundle")
+    total = 0
+    resolved: list[tuple[str, bytes]] = []
+    for f in files:
+        path, data = decode_bundle_file(f)
+        total += len(data)
+        if total > BUNDLE_MAX_BYTES:
+            raise ValueError("bundle exceeds byte cap")
+        if not _resolves_within(skill_dir, path):
+            raise ValueError(f"refusing to write through symlink escaping skill dir: {path}")
+        resolved.append((path, data))
+    written: list[str] = []
+    for path, data in resolved:
+        target = skill_dir / path
+        target.parent.mkdir(parents=True, exist_ok=True)
+        target.write_bytes(data)
+        written.append(path)
+    return written
+
+
+def remove_managed_file(skill_dir: Path, rel: str) -> None:
+    """Delete a previously manifest-tracked file, then prune emptied parent dirs."""
+    try:
+        validate_rel_path(rel)
+    except ValueError:
+        return
+    # Never unlink through a symlinked intermediate dir that escapes skill_dir.
+    if not _resolves_within(skill_dir, rel):
+        return
+    target = skill_dir / rel
+    if target.is_file() or target.is_symlink():
+        target.unlink()
+    parent = target.parent
+    while parent != skill_dir:
+        try:
+            parent.rmdir()
+        except OSError:
+            break
+        parent = parent.parent
+
+
+def _skip_symlinked_skill_dir(skills_dir: Path, name: str) -> bool:
+    """True (with a warning) if the top-level skill dir itself is a symlink.
+
+    realpath-based checks root at the symlink target, so they cannot catch a
+    symlinked top-level dir (e.g. ``skills/ezyhub-x -> ~/checkout``). Skip the
+    skill entirely rather than write or delete through it.
+    """
+    if (skills_dir / name).is_symlink():
+        print(
+            f"warning: skills/{name} is a symlink; "
+            "skipping to avoid touching files outside the skills dir"
+        )
+        return True
+    return False
+
+
 def cmd_sync_skills(args: argparse.Namespace) -> None:
     payload = request_json("GET", "/skills", backend_url=args.backend_url, token=read_codex_key())
     skills = payload.get("skills")
@@ -383,31 +584,45 @@ def cmd_sync_skills(args: argparse.Namespace) -> None:
 
     manifest = load_manifest(skills_dir)
     previous = set(manifest["managed"])
+    previous_files: dict[str, list[str]] = manifest["managed_files"]
     current: set[str] = set()
+    current_files: dict[str, list[str]] = {}
     for item in skills:
         if not isinstance(item, dict):
             continue
         name = item.get("name")
-        content = item.get("content")
-        if not isinstance(name, str) or not isinstance(content, str):
+        files = item.get("files")
+        if not isinstance(name, str) or not isinstance(files, list):
             continue
         if not name.startswith(COMPANY_SKILL_PREFIX):
             raise RuntimeError(f"refusing to write non-company skill name: {name}")
-        if not content.lstrip().startswith("---\n"):
+        if not COMPANY_SKILL_NAME_RE.fullmatch(name):
+            raise RuntimeError(f"refusing to write unsafe skill name: {name}")
+        skill_md = next((f for f in files if isinstance(f, dict) and f.get("path") == "SKILL.md"), None)
+        if skill_md is None:
+            raise RuntimeError(f"refusing to write skill bundle without SKILL.md: {name}")
+        _, skill_md_data = decode_bundle_file(skill_md)
+        if not skill_md_data.decode("utf-8", errors="replace").lstrip().startswith("---\n"):
             raise RuntimeError(f"refusing to write invalid skill without YAML frontmatter: {name}")
-        target = skills_dir / name / "SKILL.md"
-        target.parent.mkdir(parents=True, exist_ok=True)
-        target.write_text(content, encoding="utf-8")
+        if _skip_symlinked_skill_dir(skills_dir, name):
+            continue
+        written = write_bundle_files(skills_dir / name, files)
+        for rel in sorted(set(previous_files.get(name, [])) - set(written)):
+            remove_managed_file(skills_dir / name, rel)
         current.add(name)
+        current_files[name] = sorted(set(written))
 
     for removed in sorted(previous - current):
-        if not removed.startswith(COMPANY_SKILL_PREFIX):
+        if not COMPANY_SKILL_NAME_RE.fullmatch(removed):
             continue
-        target = skills_dir / removed / "SKILL.md"
-        if target.exists():
-            target.unlink()
+        if _skip_symlinked_skill_dir(skills_dir, removed):
+            continue
+        skill_dir = skills_dir / removed
+        # Old-format manifests tracked no files; they only ever managed SKILL.md.
+        for rel in sorted(set(previous_files.get(removed) or ["SKILL.md"])):
+            remove_managed_file(skill_dir, rel)
         try:
-            target.parent.rmdir()
+            skill_dir.rmdir()
         except OSError:
             pass
 
@@ -416,7 +631,7 @@ def cmd_sync_skills(args: argparse.Namespace) -> None:
     managed_mcp: list[str] = sorted(previous_mcp)
     if isinstance(servers, list):
         managed_mcp = apply_mcp_servers(codex_home(), servers, previous_mcp)
-    write_manifest(skills_dir, sorted(current), managed_mcp)
+    write_manifest(skills_dir, sorted(current), managed_mcp, current_files)
     print(f"Synced {len(current)} EzyHub role skill(s) for role {payload.get('role')}.")
     print(f"Synced {len(managed_mcp)} EzyHub MCP server config(s).")
     print("Open a new Codex App thread for skill changes to appear.")
@@ -988,6 +1203,10 @@ def parse_args() -> argparse.Namespace:
 
     sub.add_parser("status")
     sub.add_parser("sync-skills")
+    publish = sub.add_parser("publish-skill")
+    publish.add_argument("dir")
+    publish.add_argument("--role", required=True)
+    publish.add_argument("--name")
     configure_app_kb_token = sub.add_parser("configure-codex-app-kb-token")
     configure_app_kb_token.add_argument("--token-file")
     configure_app_kb_token.add_argument("--prompt-token", action="store_true")
@@ -1041,6 +1260,8 @@ def main() -> int:
             cmd_status(args)
         elif args.command == "sync-skills":
             cmd_sync_skills(args)
+        elif args.command == "publish-skill":
+            cmd_publish_skill(args)
         elif args.command == "configure-codex-app-kb-token":
             cmd_configure_codex_app_kb_token(args)
         elif args.command == "configure-codex-app-client-key":

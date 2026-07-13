@@ -21,16 +21,27 @@ The script calls:
 GET /skills Authorization: Bearer <employee key>
 ```
 
-The response includes both role skills and the employee's MCP server list (`mcp_servers`). The helper writes both:
+The response includes both role skills and the employee's MCP server list (`mcp_servers`). Skills are full directory trees — `SKILL.md` plus any `scripts/`, `references/`, and `assets/` files (binary files supported) — not just a single `SKILL.md`. The helper writes both:
 
-- skills to `CODEX_HOME/skills/<name>/SKILL.md`
+- each skill's complete tree to `CODEX_HOME/skills/<name>/`
 - MCP servers as `[mcp_servers.<name>]` sections in `CODEX_HOME/config.toml`
 
-Collision rules, tracked via the `.ezyhub-skills.json` manifest in `CODEX_HOME/skills/`:
+Collision rules are file-level, tracked via the `.ezyhub-skills.json` manifest in `CODEX_HOME/skills/`:
 
 - only names starting with the `ezyhub-` prefix are ever created, updated, or deleted by this sync
-- on an exact name match, the server always wins: the local `ezyhub-*` skill or MCP section is overwritten with the server's current content
-- a skill or MCP server previously synced but no longer returned by the backend is deleted (tracked via the manifest), so removed role skills don't linger
-- personal (non-`ezyhub-*`) skills and MCP servers are never read, added, updated, or deleted by this sync
+- within a managed `ezyhub-*` skill dir, a server file overwrites the local file at the same path (on a path collision, the server version wins)
+- only files the manifest recorded as server-managed are ever deleted (when the server no longer serves them, or the whole skill is removed); emptied directories are then pruned
+- files the employee added at other paths inside a managed skill dir, and personal (non-`ezyhub-*`) skills and MCP servers, are never read, added, updated, or deleted by this sync
+- the sync refuses to write or delete through symlinks, or anywhere outside the managed `ezyhub-*` skill dir; if a managed skill dir is itself a symlink, the sync skips that skill entirely with a warning
 
 Open a new Codex App thread after syncing.
+
+## Publish a skill
+
+To submit a local skill to the company library for your role:
+
+```bash
+python3 plugins/ezyhub/scripts/ezyhub_backend.py publish-skill <local-skill-dir> --role <role>
+```
+
+This uploads the skill directory (must contain a `SKILL.md`; symlinks are rejected) to a pending area on the backend. The skill name defaults to the directory name and must start with `ezyhub-`; pass `--name ezyhub-<slug>` to override. An admin reviews and approves the submission before it appears in the company library and reaches other employees via sync.

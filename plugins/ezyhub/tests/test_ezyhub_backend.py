@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import argparse
+import base64
 import importlib.util
 import json
 from pathlib import Path
@@ -30,6 +31,12 @@ def skill_content(name: str, body: str) -> str:
     return f"---\nname: {name}\ndescription: Test skill.\n---\n\n# {name}\n\n{body}\n"
 
 
+def skill_files(name: str, body: str, extra: list[dict] | None = None) -> list[dict]:
+    files = [{"path": "SKILL.md", "content": skill_content(name, body), "encoding": "utf-8"}]
+    files.extend(extra or [])
+    return files
+
+
 def test_sync_skills_is_idempotent_and_removes_only_managed_skills(tmp_path, monkeypatch):
     helper = load_helper()
     codex_home = tmp_path / "codex-home"
@@ -55,11 +62,11 @@ def test_sync_skills_is_idempotent_and_removes_only_managed_skills(tmp_path, mon
         "skills": [
             {
                 "name": "ezyhub-current",
-                "content": skill_content("ezyhub-current", "current body"),
+                "files": skill_files("ezyhub-current", "current body"),
             },
             {
                 "name": "ezyhub-extra",
-                "content": skill_content("ezyhub-extra", "extra body"),
+                "files": skill_files("ezyhub-extra", "extra body"),
             },
         ],
     }
@@ -88,7 +95,11 @@ def test_sync_skills_is_idempotent_and_removes_only_managed_skills(tmp_path, mon
     )
 
     manifest = json.loads((skills_dir / helper.MANIFEST_NAME).read_text(encoding="utf-8"))
-    assert manifest == {"managed": ["ezyhub-current", "ezyhub-extra"], "mcp_servers": []}
+    assert manifest == {
+        "managed": ["ezyhub-current", "ezyhub-extra"],
+        "mcp_servers": [],
+        "managed_files": {"ezyhub-current": ["SKILL.md"], "ezyhub-extra": ["SKILL.md"]},
+    }
 
 
 def test_sync_skills_rejects_non_company_skill_names(tmp_path, monkeypatch):
@@ -100,7 +111,7 @@ def test_sync_skills_rejects_non_company_skill_names(tmp_path, monkeypatch):
         "request_json",
         lambda method, path, **kwargs: {
             "role": "engineering",
-            "skills": [{"name": "outside", "content": skill_content("outside", "bad")}],
+            "skills": [{"name": "outside", "files": skill_files("outside", "bad")}],
         },
     )
 
@@ -112,17 +123,293 @@ def test_sync_skills_rejects_non_company_skill_names(tmp_path, monkeypatch):
         raise AssertionError("cmd_sync_skills should reject non-company skills")
 
 
-def test_manifest_v2_roundtrip_and_legacy_tolerance(tmp_path):
+def _sync_with_payload(helper, monkeypatch, payload):
+    monkeypatch.setattr(helper, "read_codex_key", lambda: "sk-test")
+    monkeypatch.setattr(helper, "request_json", lambda method, path, **kwargs: payload)
+    helper.cmd_sync_skills(argparse.Namespace(backend_url="http://backend"))
+
+
+def test_sync_skills_writes_multi_file_tree(tmp_path, monkeypatch):
+    helper = load_helper()
+    codex_home = tmp_path / "codex-home"
+    skills_dir = codex_home / "skills"
+    monkeypatch.setenv("CODEX_HOME", str(codex_home))
+
+    payload = {
+        "role": "engineering",
+        "skills": [
+            {
+                "name": "ezyhub-x",
+                "files": skill_files(
+                    "ezyhub-x",
+                    "body",
+                    extra=[{"path": "scripts/run.py", "content": "print('hi')\n", "encoding": "utf-8"}],
+                ),
+            },
+        ],
+    }
+    _sync_with_payload(helper, monkeypatch, payload)
+
+    assert (skills_dir / "ezyhub-x" / "SKILL.md").read_text(encoding="utf-8") == skill_content("ezyhub-x", "body")
+    assert (skills_dir / "ezyhub-x" / "scripts" / "run.py").read_text(encoding="utf-8") == "print('hi')\n"
+    manifest = helper.load_manifest(skills_dir)
+    assert manifest["managed_files"] == {"ezyhub-x": ["SKILL.md", "scripts/run.py"]}
+
+
+def test_sync_skills_deletes_server_removed_files_but_keeps_personal_files(tmp_path, monkeypatch):
+    helper = load_helper()
+    codex_home = tmp_path / "codex-home"
+    skills_dir = codex_home / "skills"
+    monkeypatch.setenv("CODEX_HOME", str(codex_home))
+
+    extra = [{"path": "scripts/run.py", "content": "print('hi')\n", "encoding": "utf-8"}]
+    payload = {
+        "role": "engineering",
+        "skills": [{"name": "ezyhub-x", "files": skill_files("ezyhub-x", "body", extra=extra)}],
+    }
+    _sync_with_payload(helper, monkeypatch, payload)
+
+    # employee adds a personal file under a different dir inside the managed skill
+    personal = skills_dir / "ezyhub-x" / "notes" / "mine.md"
+    personal.parent.mkdir(parents=True)
+    personal.write_text("my notes\n", encoding="utf-8")
+
+    # server drops scripts/run.py on the next sync
+    payload = {
+        "role": "engineering",
+        "skills": [{"name": "ezyhub-x", "files": skill_files("ezyhub-x", "body v2")}],
+    }
+    _sync_with_payload(helper, monkeypatch, payload)
+
+    assert not (skills_dir / "ezyhub-x" / "scripts" / "run.py").exists()
+    assert not (skills_dir / "ezyhub-x" / "scripts").exists()  # emptied managed dir pruned
+    assert personal.read_text(encoding="utf-8") == "my notes\n"
+    manifest = helper.load_manifest(skills_dir)
+    assert manifest["managed_files"] == {"ezyhub-x": ["SKILL.md"]}
+
+
+def test_sync_skills_refuses_to_write_through_symlinked_dir(tmp_path, monkeypatch):
+    helper = load_helper()
+    codex_home = tmp_path / "codex-home"
+    skills_dir = codex_home / "skills"
+    monkeypatch.setenv("CODEX_HOME", str(codex_home))
+
+    # employee has an unrelated project dir with a file the sync must never touch
+    outside = tmp_path / "project"
+    outside.mkdir()
+    victim = outside / "run.py"
+    victim.write_text("mine\n", encoding="utf-8")
+
+    # first sync creates the skill, then employee turns scripts/ into a symlink to it
+    _sync_with_payload(
+        helper,
+        monkeypatch,
+        {"role": "engineering", "skills": [{"name": "ezyhub-x", "files": skill_files("ezyhub-x", "body")}]},
+    )
+    (skills_dir / "ezyhub-x" / "scripts").symlink_to(outside, target_is_directory=True)
+
+    extra = [{"path": "scripts/run.py", "content": "print('hi')\n", "encoding": "utf-8"}]
+    payload = {
+        "role": "engineering",
+        "skills": [{"name": "ezyhub-x", "files": skill_files("ezyhub-x", "body", extra=extra)}],
+    }
+    try:
+        _sync_with_payload(helper, monkeypatch, payload)
+    except (RuntimeError, ValueError):
+        pass
+    # the outside file must never be written through the symlink
+    assert victim.read_text(encoding="utf-8") == "mine\n"
+
+
+def test_sync_skills_refuses_to_delete_through_symlinked_dir(tmp_path, monkeypatch):
+    helper = load_helper()
+    codex_home = tmp_path / "codex-home"
+    skills_dir = codex_home / "skills"
+    monkeypatch.setenv("CODEX_HOME", str(codex_home))
+
+    outside = tmp_path / "project"
+    outside.mkdir()
+    victim = outside / "run.py"
+    victim.write_text("mine\n", encoding="utf-8")
+
+    # manifest tracks scripts/run.py, but scripts is now a symlink to the outside dir
+    skill_dir = skills_dir / "ezyhub-x"
+    (skill_dir).mkdir(parents=True)
+    (skill_dir / "SKILL.md").write_text(skill_content("ezyhub-x", "body"), encoding="utf-8")
+    (skill_dir / "scripts").symlink_to(outside, target_is_directory=True)
+    helper.write_manifest(
+        skills_dir,
+        ["ezyhub-x"],
+        [],
+        {"ezyhub-x": ["SKILL.md", "scripts/run.py"]},
+    )
+
+    # next sync drops scripts/run.py from the bundle -> removal would target the symlink path
+    payload = {
+        "role": "engineering",
+        "skills": [{"name": "ezyhub-x", "files": skill_files("ezyhub-x", "body")}],
+    }
+    try:
+        _sync_with_payload(helper, monkeypatch, payload)
+    except (RuntimeError, ValueError):
+        pass
+    assert victim.exists()
+    assert victim.read_text(encoding="utf-8") == "mine\n"
+
+
+def test_sync_skills_skips_write_when_top_level_skill_dir_is_symlink(tmp_path, monkeypatch, capsys):
+    helper = load_helper()
+    codex_home = tmp_path / "codex-home"
+    skills_dir = codex_home / "skills"
+    monkeypatch.setenv("CODEX_HOME", str(codex_home))
+
+    # employee points the whole managed skill dir at an outside checkout
+    outside = tmp_path / "checkout"
+    outside.mkdir()
+    victim = outside / "SKILL.md"
+    victim.write_text("mine\n", encoding="utf-8")
+    skills_dir.mkdir(parents=True)
+    (skills_dir / "ezyhub-x").symlink_to(outside, target_is_directory=True)
+
+    payload = {
+        "role": "engineering",
+        "skills": [{"name": "ezyhub-x", "files": skill_files("ezyhub-x", "server body")}],
+    }
+    _sync_with_payload(helper, monkeypatch, payload)
+
+    # nothing written through the symlinked top-level dir; symlink itself untouched
+    assert victim.read_text(encoding="utf-8") == "mine\n"
+    assert (skills_dir / "ezyhub-x").is_symlink()
+    out = capsys.readouterr().out
+    assert "warning: skills/ezyhub-x is a symlink" in out
+    manifest = helper.load_manifest(skills_dir)
+    assert "ezyhub-x" not in manifest["managed"]
+
+
+def test_sync_skills_skips_removal_when_top_level_skill_dir_is_symlink(tmp_path, monkeypatch, capsys):
+    helper = load_helper()
+    codex_home = tmp_path / "codex-home"
+    skills_dir = codex_home / "skills"
+    monkeypatch.setenv("CODEX_HOME", str(codex_home))
+
+    outside = tmp_path / "checkout"
+    outside.mkdir()
+    victim = outside / "SKILL.md"
+    victim.write_text("mine\n", encoding="utf-8")
+    skills_dir.mkdir(parents=True)
+    (skills_dir / "ezyhub-x").symlink_to(outside, target_is_directory=True)
+
+    # manifest claims ezyhub-x (and its SKILL.md) is managed; server no longer serves it
+    helper.write_manifest(skills_dir, ["ezyhub-x"], [], {"ezyhub-x": ["SKILL.md"]})
+    _sync_with_payload(helper, monkeypatch, {"role": "engineering", "skills": []})
+
+    # outside files never unlinked through the symlink; symlink itself not deleted
+    assert victim.exists()
+    assert victim.read_text(encoding="utf-8") == "mine\n"
+    assert (skills_dir / "ezyhub-x").is_symlink()
+    out = capsys.readouterr().out
+    assert "warning: skills/ezyhub-x is a symlink" in out
+
+
+def test_sync_skills_binary_asset_round_trips(tmp_path, monkeypatch):
+    helper = load_helper()
+    codex_home = tmp_path / "codex-home"
+    skills_dir = codex_home / "skills"
+    monkeypatch.setenv("CODEX_HOME", str(codex_home))
+
+    blob = b"\x89PNG\r\n\x1a\n\x00\x01\x02\xff"
+    extra = [{"path": "assets/logo.png", "content": base64.b64encode(blob).decode("ascii"), "encoding": "base64"}]
+    payload = {
+        "role": "engineering",
+        "skills": [{"name": "ezyhub-x", "files": skill_files("ezyhub-x", "body", extra=extra)}],
+    }
+    _sync_with_payload(helper, monkeypatch, payload)
+
+    assert (skills_dir / "ezyhub-x" / "assets" / "logo.png").read_bytes() == blob
+
+
+def test_sync_skills_rejects_path_traversal_in_bundle(tmp_path, monkeypatch):
+    helper = load_helper()
+    codex_home = tmp_path / "codex-home"
+    skills_dir = codex_home / "skills"
+    monkeypatch.setenv("CODEX_HOME", str(codex_home))
+
+    extra = [{"path": "../evil.md", "content": "pwned\n", "encoding": "utf-8"}]
+    payload = {
+        "role": "engineering",
+        "skills": [{"name": "ezyhub-x", "files": skill_files("ezyhub-x", "body", extra=extra)}],
+    }
+    try:
+        _sync_with_payload(helper, monkeypatch, payload)
+    except (RuntimeError, ValueError):
+        pass
+    else:
+        raise AssertionError("cmd_sync_skills should reject traversal paths")
+    assert not (skills_dir / "evil.md").exists()
+    # nothing is written for the offending skill (validation happens before any write)
+    assert not (skills_dir / "ezyhub-x" / "SKILL.md").exists()
+
+
+def test_sync_skills_rejects_missing_or_frontmatterless_skill_md(tmp_path, monkeypatch):
+    helper = load_helper()
+    codex_home = tmp_path / "codex-home"
+    monkeypatch.setenv("CODEX_HOME", str(codex_home))
+
+    for files in (
+        [{"path": "README.md", "content": "no skill\n", "encoding": "utf-8"}],
+        [{"path": "SKILL.md", "content": "# no frontmatter\n", "encoding": "utf-8"}],
+    ):
+        payload = {"role": "engineering", "skills": [{"name": "ezyhub-x", "files": files}]}
+        try:
+            _sync_with_payload(helper, monkeypatch, payload)
+        except RuntimeError as exc:
+            assert "SKILL.md" in str(exc) or "frontmatter" in str(exc)
+        else:
+            raise AssertionError("cmd_sync_skills should reject invalid SKILL.md")
+
+
+def test_sync_skills_removes_skill_tracked_by_old_format_manifest(tmp_path, monkeypatch):
+    helper = load_helper()
+    codex_home = tmp_path / "codex-home"
+    skills_dir = codex_home / "skills"
+    monkeypatch.setenv("CODEX_HOME", str(codex_home))
+
+    old_skill = skills_dir / "ezyhub-old" / "SKILL.md"
+    old_skill.parent.mkdir(parents=True)
+    old_skill.write_text(skill_content("ezyhub-old", "remove me"), encoding="utf-8")
+    # old-format manifest: no managed_files key
+    (skills_dir / helper.MANIFEST_NAME).write_text('{"managed": ["ezyhub-old"]}', encoding="utf-8")
+
+    payload = {"role": "engineering", "skills": []}
+    _sync_with_payload(helper, monkeypatch, payload)
+
+    assert not old_skill.exists()
+    assert not old_skill.parent.exists()
+
+
+def test_manifest_v3_roundtrip_and_legacy_tolerance(tmp_path):
     helper = load_helper()
     skills_dir = tmp_path / "skills"
     skills_dir.mkdir()
-    # legacy shape
+    # v1 legacy shape: managed_files defaults to per-skill empty lists
     (skills_dir / ".ezyhub-skills.json").write_text('{"managed": ["ezyhub-a"]}')
     manifest = helper.load_manifest(skills_dir)
-    assert manifest == {"managed": ["ezyhub-a"], "mcp_servers": []}
-    # v2 roundtrip
-    helper.write_manifest(skills_dir, ["ezyhub-a"], ["ezyhub-kb"])
-    assert helper.load_manifest(skills_dir) == {"managed": ["ezyhub-a"], "mcp_servers": ["ezyhub-kb"]}
+    assert manifest == {"managed": ["ezyhub-a"], "mcp_servers": [], "managed_files": {"ezyhub-a": []}}
+    # v2 shape (managed + mcp_servers, no managed_files)
+    (skills_dir / ".ezyhub-skills.json").write_text('{"managed": ["ezyhub-a"], "mcp_servers": ["ezyhub-kb"]}')
+    manifest = helper.load_manifest(skills_dir)
+    assert manifest == {
+        "managed": ["ezyhub-a"],
+        "mcp_servers": ["ezyhub-kb"],
+        "managed_files": {"ezyhub-a": []},
+    }
+    # v3 roundtrip
+    helper.write_manifest(skills_dir, ["ezyhub-a"], ["ezyhub-kb"], {"ezyhub-a": ["SKILL.md", "scripts/run.py"]})
+    assert helper.load_manifest(skills_dir) == {
+        "managed": ["ezyhub-a"],
+        "mcp_servers": ["ezyhub-kb"],
+        "managed_files": {"ezyhub-a": ["SKILL.md", "scripts/run.py"]},
+    }
 
 
 def test_apply_mcp_servers_upserts_and_preserves_foreign_sections(tmp_path):
@@ -338,7 +625,7 @@ def test_sync_skills_applies_skills_and_mcp(tmp_path, monkeypatch):
         "request_json",
         lambda method, path, **kwargs: {
             "role": "default",
-            "skills": [{"name": "ezyhub-default", "content": skill_content("ezyhub-default", "Body.")}],
+            "skills": [{"name": "ezyhub-default", "files": skill_files("ezyhub-default", "Body.")}],
             "mcp_servers": [{"name": "ezyhub-kb", "url": "https://kb/mcp",
                              "bearer_token_env_var": "EZYHUB_KB_MCP_TOKEN", "enabled": True}],
             "namespace": "ezyhub",
@@ -375,7 +662,7 @@ def test_sync_skills_without_mcp_servers_key_leaves_config_and_manifest_untouche
         "request_json",
         lambda method, path, **kwargs: {
             "role": "default",
-            "skills": [{"name": "ezyhub-default", "content": skill_content("ezyhub-default", "Body.")}],
+            "skills": [{"name": "ezyhub-default", "files": skill_files("ezyhub-default", "Body.")}],
         },
     )
 
@@ -1159,3 +1446,114 @@ def test_cmd_uninstall_auto_sync_prints_summary(monkeypatch, capsys):
     assert "Removed job" in output
 
 
+
+
+def test_publish_skill_posts_local_tree_and_prints_submission_id(tmp_path, monkeypatch, capsys):
+    helper = load_helper()
+    skill_dir = tmp_path / "ezyhub-mytool"
+    (skill_dir / "scripts").mkdir(parents=True)
+    (skill_dir / "assets").mkdir()
+    (skill_dir / "SKILL.md").write_text(skill_content("ezyhub-mytool", "body"), encoding="utf-8")
+    (skill_dir / "scripts" / "run.py").write_text("print(1)\n", encoding="utf-8")
+    (skill_dir / "assets" / "logo.bin").write_bytes(b"\x00\x01\x02")
+
+    captured: dict = {}
+
+    def fake_request_json(method, path, **kwargs):
+        captured["method"] = method
+        captured["path"] = path
+        captured.update(kwargs)
+        return {"submission_id": "sub-abc123"}
+
+    monkeypatch.setattr(helper, "read_codex_key", lambda: "sk-secret-key")
+    monkeypatch.setattr(helper, "request_json", fake_request_json)
+
+    helper.cmd_publish_skill(
+        argparse.Namespace(backend_url="http://backend", dir=str(skill_dir), role="engineering", name=None)
+    )
+
+    assert captured["method"] == "POST"
+    assert captured["path"] == "/skills/submit"
+    assert captured["token"] == "sk-secret-key"
+    body = captured["body"]
+    assert body["skill_name"] == "ezyhub-mytool"  # inferred from dir basename
+    assert body["target_role"] == "engineering"
+    assert sorted(f["path"] for f in body["files"]) == ["SKILL.md", "assets/logo.bin", "scripts/run.py"]
+    logo = next(f for f in body["files"] if f["path"] == "assets/logo.bin")
+    assert logo["encoding"] == "base64"
+    assert base64.b64decode(logo["content"]) == b"\x00\x01\x02"
+
+    output = capsys.readouterr().out
+    assert "sub-abc123" in output
+    assert "sk-secret-key" not in output
+
+
+def test_publish_skill_rejects_non_company_name(tmp_path, monkeypatch, capsys):
+    import pytest
+
+    helper = load_helper()
+    skill_dir = tmp_path / "mytool"
+    skill_dir.mkdir()
+    (skill_dir / "SKILL.md").write_text(skill_content("mytool", "body"), encoding="utf-8")
+
+    monkeypatch.setattr(helper, "read_codex_key", lambda: "sk-secret-key")
+    monkeypatch.setattr(
+        helper,
+        "request_json",
+        lambda *args, **kwargs: (_ for _ in ()).throw(AssertionError("must not POST an invalid name")),
+    )
+
+    with pytest.raises(RuntimeError, match="ezyhub-"):
+        helper.cmd_publish_skill(
+            argparse.Namespace(backend_url="http://backend", dir=str(skill_dir), role="engineering", name=None)
+        )
+    with pytest.raises(RuntimeError, match="ezyhub-"):
+        helper.cmd_publish_skill(
+            argparse.Namespace(backend_url="http://backend", dir=str(skill_dir), role="engineering", name="rogue")
+        )
+
+    # --name override with a company name is accepted
+    monkeypatch.setattr(helper, "request_json", lambda method, path, **kwargs: {"submission_id": "sub-1"})
+    helper.cmd_publish_skill(
+        argparse.Namespace(backend_url="http://backend", dir=str(skill_dir), role="engineering", name="ezyhub-mytool")
+    )
+    output = capsys.readouterr().out
+    assert "sub-1" in output
+    assert "sk-secret-key" not in output
+
+
+def test_publish_skill_local_reader_rejects_symlinks_and_oversize(tmp_path, monkeypatch):
+    import pytest
+
+    helper = load_helper()
+    monkeypatch.setattr(helper, "read_codex_key", lambda: "sk-secret-key")
+    monkeypatch.setattr(
+        helper,
+        "request_json",
+        lambda *args, **kwargs: (_ for _ in ()).throw(AssertionError("must not POST an unsafe bundle")),
+    )
+
+    outside = tmp_path / "outside.txt"
+    outside.write_text("secret", encoding="utf-8")
+    linked = tmp_path / "ezyhub-linked"
+    linked.mkdir()
+    (linked / "SKILL.md").write_text(skill_content("ezyhub-linked", "body"), encoding="utf-8")
+    (linked / "leak.md").symlink_to(outside)
+    with pytest.raises(ValueError, match="symlink"):
+        helper.cmd_publish_skill(
+            argparse.Namespace(backend_url="http://backend", dir=str(linked), role="engineering", name=None)
+        )
+
+    big = tmp_path / "ezyhub-big"
+    big.mkdir()
+    (big / "SKILL.md").write_text(skill_content("ezyhub-big", "body"), encoding="utf-8")
+    (big / "big.txt").write_bytes(b"x" * (helper.FILE_MAX_BYTES + 1))
+    with pytest.raises(ValueError, match="size cap"):
+        helper.cmd_publish_skill(
+            argparse.Namespace(backend_url="http://backend", dir=str(big), role="engineering", name=None)
+        )
+
+    with pytest.raises(RuntimeError, match="does not exist"):
+        helper.cmd_publish_skill(
+            argparse.Namespace(backend_url="http://backend", dir=str(tmp_path / "ezyhub-missing"), role="engineering", name=None)
+        )

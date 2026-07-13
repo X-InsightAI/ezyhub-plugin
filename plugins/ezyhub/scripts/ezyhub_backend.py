@@ -942,7 +942,23 @@ def build_doctor_report(args: argparse.Namespace) -> dict[str, Any]:
     else:
         try:
             payload = request_json_url(args.kb_health_url)
-            checks["kb_mcp"] = {"ok": bool(payload.get("ready")), "payload": payload}
+            ready = bool(payload.get("ready"))
+            configured = payload.get("configured")
+            unprovisioned = (
+                not ready
+                and isinstance(configured, dict)
+                and configured
+                and not any(configured.values())
+            )
+            if unprovisioned:
+                checks["kb_mcp"] = {
+                    "ok": False,
+                    "skipped": True,
+                    "reason": "KB MCP is not provisioned yet; skipping until it is configured",
+                    "payload": payload,
+                }
+            else:
+                checks["kb_mcp"] = {"ok": ready, "payload": payload}
         except Exception as exc:
             checks["kb_mcp"] = {"ok": False, "error": str(exc)}
 

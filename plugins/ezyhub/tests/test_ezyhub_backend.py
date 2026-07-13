@@ -1913,3 +1913,67 @@ def test_key_rotate_parser_defaults_to_gpt_56_sol(monkeypatch):
     args = helper.parse_args()
     assert args.model == "gpt-5.6-sol"
     assert args.base_url == helper.DEFAULT_GATEWAY_BASE_URL
+
+
+def _doctor_args(**overrides):
+    base = dict(backend_url="https://backend", kb_health_url="https://kb/health", no_kb=False, admin_key=None)
+    base.update(overrides)
+    return argparse.Namespace(**base)
+
+
+def test_doctor_kb_mcp_skipped_when_unprovisioned(monkeypatch):
+    helper = load_helper()
+    monkeypatch.setattr(helper, "request_json", lambda *a, **k: {"ok": True})
+    monkeypatch.setattr(
+        helper,
+        "request_json_url",
+        lambda url: {
+            "ok": True,
+            "ready": False,
+            "configured": {
+                "ezyhub_api_key": False,
+                "knowledge_base_ids": False,
+                "mcp_bearer_token": False,
+                "workspace_id": False,
+            },
+        },
+    )
+    monkeypatch.delenv("EZYHUB_ADMIN_KEY", raising=False)
+    report = helper.build_doctor_report(_doctor_args())
+    kb = report["checks"]["kb_mcp"]
+    assert kb["skipped"] is True
+    assert kb["ok"] is False
+    assert "not provisioned" in kb["reason"]
+
+
+def test_doctor_kb_mcp_fails_when_partially_configured(monkeypatch):
+    helper = load_helper()
+    monkeypatch.setattr(helper, "request_json", lambda *a, **k: {"ok": True})
+    monkeypatch.setattr(
+        helper,
+        "request_json_url",
+        lambda url: {
+            "ok": True,
+            "ready": False,
+            "configured": {
+                "ezyhub_api_key": True,
+                "knowledge_base_ids": False,
+                "mcp_bearer_token": True,
+                "workspace_id": True,
+            },
+        },
+    )
+    monkeypatch.delenv("EZYHUB_ADMIN_KEY", raising=False)
+    report = helper.build_doctor_report(_doctor_args())
+    kb = report["checks"]["kb_mcp"]
+    assert kb["ok"] is False
+    assert not kb.get("skipped")
+
+
+def test_doctor_kb_mcp_ok_when_ready(monkeypatch):
+    helper = load_helper()
+    monkeypatch.setattr(helper, "request_json", lambda *a, **k: {"ok": True})
+    monkeypatch.setattr(helper, "request_json_url", lambda url: {"ok": True, "ready": True})
+    monkeypatch.delenv("EZYHUB_ADMIN_KEY", raising=False)
+    report = helper.build_doctor_report(_doctor_args())
+    assert report["checks"]["kb_mcp"]["ok"] is True

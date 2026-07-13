@@ -10,14 +10,14 @@ Company plugin marketplace for [Codex App](https://openai.com/codex). Ships the 
 
 The easiest way to install is to paste this to your Codex agent:
 
-> Install the EzyHub company plugin. Follow the "Instructions for AI agents" section of https://github.com/X-InsightAI/codex-plugins exactly.
+> Install the EzyHub company plugin. Follow the "Instructions for AI agents" section of https://github.com/X-InsightAI/ezyhub-plugin exactly.
 
 The agent installs the plugin and runs enrollment. Your only manual step is signing in with your company Google account when the browser opens, then opening a new Codex thread at the end.
 
 ### Manual install
 
 ```bash
-codex plugin marketplace add https://github.com/X-InsightAI/codex-plugins
+codex plugin marketplace add https://github.com/X-InsightAI/ezyhub-plugin
 codex plugin add ezyhub@ezytrail
 ```
 
@@ -41,7 +41,7 @@ Check that the `codex` CLI is available (`codex --version`) and that `git` and P
 **Step 2 — Install the plugin**
 
 ```bash
-codex plugin marketplace add https://github.com/X-InsightAI/codex-plugins
+codex plugin marketplace add https://github.com/X-InsightAI/ezyhub-plugin
 codex plugin add ezyhub@ezytrail
 ```
 
@@ -50,8 +50,8 @@ codex plugin add ezyhub@ezytrail
 Clone this repository to a persistent location and run the one-shot enroll helper from the clone. Do not use a temporary directory: the auto-sync job installed at the end keeps running the helper from this path.
 
 ```bash
-git clone --depth 1 https://github.com/X-InsightAI/codex-plugins ~/.ezytrail/codex-plugins
-cd ~/.ezytrail/codex-plugins
+git clone --depth 1 https://github.com/X-InsightAI/ezyhub-plugin ~/.ezytrail/ezyhub-plugin
+cd ~/.ezytrail/ezyhub-plugin
 python3 plugins/ezyhub/scripts/ezyhub_backend.py enroll-backend
 ```
 

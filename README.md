@@ -32,7 +32,7 @@ You are installing a company plugin on an employee machine. Follow these steps e
 - Work with shell commands and local files only. Do not use web search or browsing tools at any point — everything you need is in this repository.
 - Installation needs the network: `git clone`, `codex plugin ...`, and the enroll helper all make network requests. If your shell policy blocks one of these commands, ask the user to approve it or to run that one command themselves — do not hunt for offline copies or alternative sources.
 - Never print, log, or paste the gateway key anywhere (chat, URLs, files). The enroll helper handles all key material itself.
-- Do not install `uv`, create a virtualenv, or install any Python packages — every helper script is Python stdlib-only. Do not install Python or check Python versions either: run the helpers with the Python already available in your task runtime (Codex App bundles one; `python` or `python3`, whichever responds).
+- Do not install anything to run the helper scripts — they have zero dependencies. Run them as-is with the runtime you already have.
 - Do not harvest keys from any existing Codex/CLIProxyAPI config. Keys are issued only by the enrollment backend.
 - Do not modify the user's `auth.json` or sign them out of ChatGPT. Enrollment coexists with a ChatGPT login.
 

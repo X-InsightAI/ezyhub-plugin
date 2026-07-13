@@ -31,7 +31,6 @@ You are installing a company plugin on an employee machine. Follow these steps e
 
 - Never print, log, or paste the gateway key anywhere (chat, URLs, files). The enroll helper handles all key material itself.
 - Do not install `uv`, create a virtualenv, or install any Python packages — every helper script is Python stdlib-only.
-- Use `python3` on macOS/Linux and `python` on Windows.
 - Do not harvest keys from any existing Codex/CLIProxyAPI config. Keys are issued only by the enrollment backend.
 - Do not modify the user's `auth.json` or sign them out of ChatGPT. Enrollment coexists with a ChatGPT login.
 
@@ -48,11 +47,11 @@ codex plugin add ezyhub@ezytrail
 
 **Step 3 — Enroll**
 
-Clone this repository into a temporary directory and run the one-shot enroll helper from the clone (the helper configures `CODEX_HOME`, so where it runs from does not matter):
+Clone this repository to a persistent location and run the one-shot enroll helper from the clone. Do not use a temporary directory: the auto-sync job installed at the end keeps running the helper from this path.
 
 ```bash
-git clone --depth 1 https://github.com/X-InsightAI/codex-plugins <tmpdir>/ezytrail-plugins
-cd <tmpdir>/ezytrail-plugins
+git clone --depth 1 https://github.com/X-InsightAI/codex-plugins ~/.ezytrail/codex-plugins
+cd ~/.ezytrail/codex-plugins
 python3 plugins/ezyhub/scripts/ezyhub_backend.py enroll-backend
 ```
 

@@ -1,6 +1,6 @@
 {
   "name": "ezyhub",
-  "version": "0.1.0+codex.20260713132609",
+  "version": "0.1.0+codex.20260713132930",
   "description": "EzyHub company Codex App plugin",
   "author": {
     "name": "EzyHub"
@@ -8,8 +8,8 @@
   "skills": "./skills/",
   "interface": {
     "displayName": "EzyHub",
-    "shortDescription": "Use the company Codex gateway and skills.",
-    "longDescription": "EzyHub configures Codex App for the company model gateway, role skills, and MCP tools.",
+    "shortDescription": "Company model gateway, role skills, and knowledge tools.",
+    "longDescription": "Connects Codex App to the EzyHub company platform. /enroll signs you in with your company Google account and issues a managed gateway key (your ChatGPT login stays), switches models to the company gateway, syncs the skills for your role, and configures the company knowledge-base MCP server. Skills and tools stay up to date automatically.",
     "developerName": "EzyHub",
     "category": "Productivity",
     "capabilities": [
@@ -20,7 +20,13 @@
       "Enroll this Codex App with EzyHub.",
       "Sync my EzyHub role skills.",
       "Check my EzyHub Codex key status."
-    ]
+    ],
+    "websiteURL": "https://github.com/X-InsightAI/ezyhub-plugin",
+    "brandColor": "#F7941D",
+    "composerIcon": "./assets/icon.png",
+    "logo": "./assets/logo.png",
+    "logoDark": "./assets/logo-dark.png"
   },
-  "mcpServers": "./.mcp.json"
+  "mcpServers": "./.mcp.json",
+  "homepage": "https://github.com/X-InsightAI/ezyhub-plugin"
 }

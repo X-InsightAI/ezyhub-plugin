@@ -10,7 +10,7 @@ Company plugin marketplace for [Codex App](https://openai.com/codex). Ships the 
 
 The easiest way to install is to paste this to your Codex agent:
 
-> Install the EzyHub company plugin. Follow the "Instructions for AI agents" section of https://github.com/X-InsightAI/ezyhub-plugin exactly.
+> Install the EzyHub company plugin. Using shell commands only (no web search): `git clone --depth 1 https://github.com/X-InsightAI/ezyhub-plugin` into `~/.ezyhub/ezyhub-plugin` (Windows: `%USERPROFILE%\.ezyhub\ezyhub-plugin`), then read `README.md` in the clone and follow its "Instructions for AI agents" exactly.
 
 The agent installs the plugin and runs enrollment. Your only manual step is signing in with your company Google account when the browser opens, then opening a new Codex thread at the end.
 
@@ -29,6 +29,7 @@ You are installing a company plugin on an employee machine. Follow these steps e
 
 **Rules**
 
+- Work with shell commands and local files only. Do not use web search or browsing tools at any point — everything you need is in this repository.
 - Never print, log, or paste the gateway key anywhere (chat, URLs, files). The enroll helper handles all key material itself.
 - Do not install `uv`, create a virtualenv, or install any Python packages — every helper script is Python stdlib-only.
 - Do not harvest keys from any existing Codex/CLIProxyAPI config. Keys are issued only by the enrollment backend.
@@ -47,7 +48,7 @@ codex plugin add ezyhub@ezyhub
 
 **Step 3 — Enroll**
 
-Clone this repository to a persistent location and run the one-shot enroll helper from the clone. Do not use a temporary directory: the auto-sync job installed at the end keeps running the helper from this path.
+Run the one-shot enroll helper from the clone of this repository (clone it now if you haven't already). The clone must be at a persistent location such as `~/.ezyhub/ezyhub-plugin`, not a temporary directory: the auto-sync job installed at the end keeps running the helper from this path.
 
 ```bash
 git clone --depth 1 https://github.com/X-InsightAI/ezyhub-plugin ~/.ezyhub/ezyhub-plugin

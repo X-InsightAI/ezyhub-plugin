@@ -1,0 +1,11 @@
+{
+  "mcpServers": {
+    "ezyhub-kb": {
+      "url": "https://kb.ezyapis.com/mcp",
+      "bearer_token_env_var": "EZYHUB_KB_MCP_TOKEN",
+      "tool_timeout_sec": 60,
+      "required": false,
+      "enabled": true
+    }
+  }
+}

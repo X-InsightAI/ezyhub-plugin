@@ -1,0 +1,20 @@
+{
+  "name": "ezytrail",
+  "interface": {
+    "displayName": "EzyTrail"
+  },
+  "plugins": [
+    {
+      "name": "ezyhub",
+      "source": {
+        "source": "local",
+        "path": "./plugins/ezyhub"
+      },
+      "policy": {
+        "installation": "AVAILABLE",
+        "authentication": "ON_INSTALL"
+      },
+      "category": "Productivity"
+    }
+  ]
+}

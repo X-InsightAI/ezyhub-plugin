@@ -1,0 +1,26 @@
+{
+  "name": "ezyhub",
+  "version": "0.1.0+codex.20260713030503",
+  "description": "EzyHub company Codex App plugin",
+  "author": {
+    "name": "EzyHub"
+  },
+  "skills": "./skills/",
+  "interface": {
+    "displayName": "EzyHub",
+    "shortDescription": "Use the company Codex gateway and skills.",
+    "longDescription": "EzyHub configures Codex App for the company model gateway, role skills, and MCP tools.",
+    "developerName": "EzyHub",
+    "category": "Productivity",
+    "capabilities": [
+      "Interactive",
+      "Write"
+    ],
+    "defaultPrompt": [
+      "Enroll this Codex App with EzyHub.",
+      "Sync my EzyHub role skills.",
+      "Check my EzyHub Codex key status."
+    ]
+  },
+  "mcpServers": "./.mcp.json"
+}

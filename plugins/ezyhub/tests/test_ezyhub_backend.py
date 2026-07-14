@@ -786,15 +786,12 @@ def test_enroll_backend_prints_resume_command_on_sync_failure(monkeypatch, capsy
 def test_employee_defaults_use_public_domains():
     helper = load_helper()
     configure = load_configure_helper()
-    plugin_root = Path(__file__).resolve().parents[1]
-    mcp_config = json.loads((plugin_root / ".mcp.json").read_text(encoding="utf-8"))
 
     defaults = [
         helper.DEFAULT_BACKEND_URL,
         helper.DEFAULT_KB_HEALTH_URL,
         helper.DEFAULT_GATEWAY_BASE_URL,
         configure.DEFAULT_BASE_URL,
-        mcp_config["mcpServers"]["ezyhub-kb"]["url"],
     ]
 
     assert all(value.startswith("https://") for value in defaults)
@@ -2002,44 +1999,31 @@ def test_write_bundle_files_rejects_oversized_role_bundle(tmp_path):
         helper.write_bundle_files(tmp_path / "skill", files)
 
 
-def test_enroll_backend_refreshes_process_key_env(monkeypatch):
+def test_read_codex_key_ignores_stale_process_env(tmp_path, monkeypatch):
+    # A long-running Codex App can carry a stale EZYHUB_CODEX_KEY in its process
+    # env; read_codex_key must read the freshly enrolled key from CODEX_HOME/.env
+    # and ignore the inherited process var.
     helper = load_helper()
+    home = tmp_path / "codex"
+    home.mkdir()
+    (home / ".env").write_text("EZYHUB_CODEX_KEY=sk-ezyhub-fresh\n", encoding="utf-8")
+    monkeypatch.setattr(helper, "codex_home", lambda: home)
     monkeypatch.setenv("EZYHUB_CODEX_KEY", "sk-ezyhub-stale")
-    seen = {}
-
-    def fake_request_json(method, path, **kwargs):
-        if path == "/enroll/sessions":
-            return {"session_id": "s1", "device_secret": "d1", "browser_url": "http://example.invalid"}
-        if path.startswith("/enroll/sessions/"):
-            return {"status": "complete", "key": "sk-ezyhub-new", "role": "engineering"}
-        raise AssertionError(f"unexpected path {path}")
-
-    monkeypatch.setattr(helper, "request_json", fake_request_json)
-    monkeypatch.setattr(helper, "configure_codex_with_key", lambda *a, **k: None)
-    monkeypatch.setattr(helper, "cmd_sync_skills", lambda args: seen.update(env=os.environ.get("EZYHUB_CODEX_KEY")))
-    monkeypatch.setattr(helper, "install_auto_sync", lambda *a, **k: "auto-sync ok")
-    args = argparse.Namespace(
-        backend_url="https://backend", base_url="https://gw/v1", model="gpt-5.6-sol",
-        no_open_browser=True, dev_complete=False, poll_timeout_seconds=1,
-        poll_interval_seconds=0.01, skip_sync_skills=False, skip_auto_sync=False,
-        auto_sync_interval_hours=4,
-    )
-    helper.cmd_enroll_backend(args)
-    assert seen["env"] == "sk-ezyhub-new"
+    assert helper.read_codex_key() == "sk-ezyhub-fresh"
 
 
-def test_sync_skills_401_hint_mentions_stale_env(monkeypatch):
+def test_sync_skills_401_hint_suggests_reenroll(monkeypatch):
     helper = load_helper()
-    monkeypatch.setenv("EZYHUB_CODEX_KEY", "sk-ezyhub-stale")
 
     def fail(*a, **k):
         raise RuntimeError("GET /skills failed: HTTP 401 {\"detail\":\"invalid key\"}")
 
     monkeypatch.setattr(helper, "request_json", fail)
-    monkeypatch.setattr(helper, "read_codex_key", lambda: "sk-ezyhub-stale")
+    monkeypatch.setattr(helper, "read_codex_key", lambda: "sk-ezyhub-x")
     with pytest.raises(RuntimeError) as err:
         helper.cmd_sync_skills(argparse.Namespace(backend_url="https://backend"))
-    assert "env -u EZYHUB_CODEX_KEY" in str(err.value)
+    msg = str(err.value)
+    assert "enroll-backend" in msg and "key-rotate" in msg
 
 
 def test_doctor_ready_ignores_skipped_checks(monkeypatch):

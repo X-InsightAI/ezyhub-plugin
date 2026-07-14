@@ -5,7 +5,7 @@ description: Sync EzyHub role-based skills into the local Codex skills directory
 
 # /sync-skills
 
-Sync company-managed role skills and the EzyHub KB MCP server config.
+Sync company-managed role skills.
 
 `/enroll` already runs this once as part of enrollment, and a background job installed by `/enroll` re-runs it automatically (default every 4 hours; see `plugins/ezyhub/skills/enroll/SKILL.md`). Run it manually to force an immediate refresh — for example after a role change or an announced skill update.
 

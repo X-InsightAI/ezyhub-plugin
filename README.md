@@ -4,7 +4,6 @@ Company plugin marketplace for [Codex App](https://openai.com/codex). Ships the 
 
 - **Company model gateway** — enroll once, get a personal gateway key issued and managed by the company control plane
 - **Role-based skills** — company skills for your role, synced automatically and kept up to date
-- **Approved MCP tools** — company knowledge base search, pre-configured
 
 ## Quick Start
 
@@ -83,7 +82,6 @@ Once installed, these skills are available in Codex App:
 | `/key-status` | Show current enrollment status and key metadata |
 | `/key-rotate` | Rotate the gateway key and reconfigure Codex |
 | `/sync-skills` | Sync role-based company skills into the local Codex skills directory |
-| `/kb` | Query the company knowledge base through the approved MCP server |
 
 ## Updating
 

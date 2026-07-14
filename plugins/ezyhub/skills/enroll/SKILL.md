@@ -17,7 +17,7 @@ macOS/Linux or `python` on Windows.
 
 ## One-shot enroll
 
-`enroll-backend` is one command that does the whole enrollment chain: it creates the enroll session, opens the browser, waits for the employee to complete Google sign-in and click "Authorize Codex" in EzyHub, then configures Codex, syncs role skills and the KB MCP server, and installs a background auto-sync job — all in one run.
+`enroll-backend` is one command that does the whole enrollment chain: it creates the enroll session, opens the browser, waits for the employee to complete Google sign-in and click "Authorize Codex" in EzyHub, then configures Codex, syncs role skills, and installs a background auto-sync job — all in one run.
 
 ```bash
 python3 plugins/ezyhub/scripts/ezyhub_backend.py enroll-backend
@@ -28,7 +28,7 @@ On Windows, use `python` instead of `python3` if that is the available launcher.
 What happens after the browser step completes:
 
 1. Codex provider/key are configured (see "Mixed-auth provider config" below).
-2. Role skills and the EzyHub KB MCP server config are synced (same as `/sync-skills`; see `plugins/ezyhub/skills/sync-skills/SKILL.md` for collision rules). Skip with `--skip-sync-skills`.
+2. Role skills are synced (same as `/sync-skills`; see `plugins/ezyhub/skills/sync-skills/SKILL.md` for collision rules). Skip with `--skip-sync-skills`.
 3. A background job is installed that re-runs the sync automatically, default every 4 hours. Skip with `--skip-auto-sync`, change the interval with `--auto-sync-interval-hours <n>`.
 
 If step 2 or 3 fails after the key is already configured, the helper prints a resume command (`sync-skills` or `install-auto-sync`) rather than leaving the employee stuck mid-flow.

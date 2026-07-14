@@ -79,8 +79,11 @@ def codex_env_values(home: Path | None = None) -> dict[str, str]:
 def read_codex_key() -> str:
     home = codex_home()
     env_values = codex_env_values(home)
-    # 1. EZYHUB_CODEX_KEY (process env then CODEX_HOME/.env)
-    value = os.environ.get(CODEX_CLIENT_KEY_ENV, "").strip() or env_values.get(CODEX_CLIENT_KEY_ENV, "").strip()
+    # 1. EZYHUB_CODEX_KEY read directly from CODEX_HOME/.env — the persisted source
+    #    of truth that enroll/key-rotate write. We deliberately do NOT read an
+    #    inherited process env var: a long-running Codex App can carry a stale key
+    #    that would otherwise outrank the freshly enrolled one in .env.
+    value = env_values.get(CODEX_CLIENT_KEY_ENV, "").strip()
     if value:
         return value
     # 2. active provider inline experimental_bearer_token (only when the active
@@ -611,11 +614,11 @@ def cmd_sync_skills(args: argparse.Namespace) -> None:
     try:
         payload = request_json("GET", "/skills", backend_url=args.backend_url, token=read_codex_key())
     except RuntimeError as exc:
-        if "HTTP 401" in str(exc) and os.environ.get(CODEX_CLIENT_KEY_ENV):
+        if "HTTP 401" in str(exc):
             raise RuntimeError(
-                f"{exc}\nHint: this shell exports {CODEX_CLIENT_KEY_ENV}, which may be a stale key "
-                f"that outranks the enrolled one in CODEX_HOME/.env. Retry without it: "
-                f"env -u {CODEX_CLIENT_KEY_ENV} {HELPER_COMMAND} sync-skills"
+                f"{exc}\nHint: the EzyHub key in CODEX_HOME/.env was rejected. "
+                f"Re-run enrollment ({HELPER_COMMAND} enroll-backend) or rotate the key "
+                f"({HELPER_COMMAND} key-rotate)."
             ) from exc
         raise
     skills = payload.get("skills")
@@ -1253,10 +1256,8 @@ def cmd_enroll_backend(args: argparse.Namespace) -> None:
     if not isinstance(key, str) or not key:
         raise RuntimeError("enroll result did not include a key")
     configure_codex_with_key(key, args.base_url, args.model)
-    # An already-running Codex session can carry a stale EZYHUB_CODEX_KEY that
-    # outranks the freshly written .env value; refresh this process (and its
-    # children: sync, auto-sync) so they use the key just issued.
-    os.environ[CODEX_CLIENT_KEY_ENV] = key
+    # read_codex_key reads the freshly written CODEX_HOME/.env directly (not the
+    # process env), so the in-process sync below and future runs use this new key.
     print("Codex provider and key configured.")
     if not args.skip_sync_skills:
         try:

@@ -1,3 +1,10 @@
+<p align="center">
+  <picture>
+    <source media="(prefers-color-scheme: dark)" srcset="plugins/ezyhub/assets/logo-dark.png">
+    <img src="plugins/ezyhub/assets/logo.png" alt="EzyTrail" width="96">
+  </picture>
+</p>
+
 # EzyHub Codex Plugin
 
 Company plugin marketplace for [Codex App](https://openai.com/codex). Ships the **ezyhub** plugin, which connects your Codex App to the EzyHub company platform:
@@ -56,7 +63,7 @@ cd ~/.ezyhub/ezyhub-plugin
 python3 plugins/ezyhub/scripts/ezyhub_backend.py enroll-backend
 ```
 
-A browser window opens. Tell the user to sign in with their **company Google account** and click **"Authorize Codex"**. The script waits for them and then finishes on its own: it configures the Codex provider and key, syncs role skills and the company MCP server, and installs a background auto-sync job.
+A browser window opens. Tell the user to sign in with their **company Google account** and click **"Authorize Codex"**. The script waits for them and then finishes on its own: it configures the Codex provider and key, syncs role skills, and installs a background auto-sync job.
 
 If enrollment fails partway after the key is configured, the helper prints the exact resume command (`sync-skills` or `install-auto-sync`). Run that printed command — do not invent a different recovery.
 
@@ -66,7 +73,7 @@ If enrollment fails partway after the key is configured, the helper prints the e
 python3 plugins/ezyhub/scripts/ezyhub_backend.py doctor
 ```
 
-All employee-facing checks should pass (admin-only checks report "skipped" — that is normal).
+This live-tests the enrolled key against the company model gateway (the `gateway` check) and confirms the key backend is reachable and auto-sync is installed. All employee-facing checks should pass; admin-only checks report "skipped" — that is normal.
 
 **Step 5 — Hand back to the user**
 

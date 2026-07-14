@@ -892,8 +892,64 @@ def nested_missing(payload: dict[str, Any]) -> list[str]:
     return sorted(set(missing))
 
 
+def check_gateway_key() -> dict[str, Any]:
+    """Verify the gateway key in config.toml actually drives the model gateway.
+
+    Reads the active provider's base_url + inline experimental_bearer_token (the
+    exact credential Codex sends on model requests) and calls the gateway's
+    `/models` endpoint with it. This is the check that matters for whether the
+    employee can actually use Codex: a valid key returning the selected model
+    means model requests will work. The key is never returned or logged.
+    """
+    home = codex_home()
+    config_path = home / "config.toml"
+    if not config_path.exists():
+        return {"ok": False, "reason": "config.toml not found; run /enroll"}
+    try:
+        cfg = parse_codex_config_strings(config_path.read_text(encoding="utf-8"))
+    except Exception as exc:
+        return {"ok": False, "error": str(exc)}
+    providers = cfg.get("model_providers")
+    providers = providers if isinstance(providers, dict) else {}
+    model_provider = cfg.get("model_provider")
+    active = providers.get(model_provider) if isinstance(model_provider, str) else None
+    active = active if isinstance(active, dict) else {}
+    base_url = active.get("base_url")
+    token = active.get("experimental_bearer_token")
+    model = cfg.get("model")
+    if not isinstance(base_url, str) or not base_url.strip():
+        return {"ok": False, "reason": "no gateway base_url in config.toml; run /enroll"}
+    if not isinstance(token, str) or not token.strip():
+        return {"ok": False, "reason": "no gateway key (experimental_bearer_token) in config.toml; run /enroll"}
+    try:
+        payload = request_json("GET", "/models", backend_url=base_url.strip().rstrip("/"), token=token.strip())
+    except RuntimeError as exc:
+        masked = str(exc).replace(token.strip(), "***")
+        if "HTTP 401" in masked or "HTTP 403" in masked:
+            return {"ok": False, "reason": "gateway rejected the key (invalid or revoked); run /key-rotate or /enroll"}
+        return {"ok": False, "reason": "gateway request failed", "detail": masked}
+    ids = [m.get("id") for m in payload.get("data", []) if isinstance(m, dict)]
+    model_available = isinstance(model, str) and model in ids
+    result: dict[str, Any] = {
+        "ok": bool(ids) and (model_available or not isinstance(model, str)),
+        "payload": {
+            "gateway": base_url.strip().rstrip("/"),
+            "model": model if isinstance(model, str) else None,
+            "model_available": model_available,
+            "model_count": len(ids),
+        },
+    }
+    if isinstance(model, str) and not model_available:
+        result["reason"] = f"key valid and gateway reachable, but model '{model}' is not served by the gateway"
+    return result
+
+
 def build_doctor_report(args: argparse.Namespace) -> dict[str, Any]:
     checks: dict[str, dict[str, Any]] = {}
+
+    # The check that actually determines whether the employee can use Codex:
+    # does the config.toml key drive the model gateway.
+    checks["gateway"] = check_gateway_key()
 
     try:
         payload = request_json("GET", "/health", backend_url=args.backend_url)
@@ -1010,6 +1066,8 @@ def cmd_doctor(args: argparse.Namespace) -> None:
                 print(f"- {name}: ok")
                 continue
             print(f"- {name}: not ready")
+            if item.get("reason"):
+                print(f"  {item['reason']}")
             if item.get("error"):
                 print(f"  error: {item['error']}")
             payload = item.get("payload")

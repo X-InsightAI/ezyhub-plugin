@@ -2028,6 +2028,7 @@ def test_sync_skills_401_hint_suggests_reenroll(monkeypatch):
 
 def test_doctor_ready_ignores_skipped_checks(monkeypatch):
     helper = load_helper()
+    monkeypatch.setattr(helper, "check_gateway_key", lambda: {"ok": True})
     monkeypatch.setattr(helper, "request_json", lambda *a, **k: {"ok": True})
     monkeypatch.setattr(
         helper,
@@ -2042,6 +2043,7 @@ def test_doctor_ready_ignores_skipped_checks(monkeypatch):
 
 def test_doctor_not_ready_when_real_check_fails(monkeypatch):
     helper = load_helper()
+    monkeypatch.setattr(helper, "check_gateway_key", lambda: {"ok": True})
 
     def fail(*a, **k):
         raise RuntimeError("backend down")
@@ -2051,3 +2053,82 @@ def test_doctor_not_ready_when_real_check_fails(monkeypatch):
     monkeypatch.delenv("EZYHUB_ADMIN_KEY", raising=False)
     report = helper.build_doctor_report(_doctor_args())
     assert report["ready"] is False
+
+
+_GATEWAY_CONFIG = (
+    'model_provider = "ezyapis"\n'
+    'model = "gpt-5.6-sol"\n'
+    "[model_providers.ezyapis]\n"
+    'name = "EzyHub"\n'
+    'base_url = "https://api.ezyapis.com/v1"\n'
+    'wire_api = "responses"\n'
+    'experimental_bearer_token = "sk-ezyhub-secret"\n'
+    "requires_openai_auth = true\n"
+)
+
+
+def test_check_gateway_key_ok_uses_config_token_against_gateway(tmp_path, monkeypatch):
+    helper = load_helper()
+    home = tmp_path / "codex"
+    home.mkdir()
+    (home / "config.toml").write_text(_GATEWAY_CONFIG, encoding="utf-8")
+    monkeypatch.setattr(helper, "codex_home", lambda: home)
+    seen = {}
+
+    def fake_request_json(method, path, **kwargs):
+        seen.update(method=method, path=path, backend_url=kwargs.get("backend_url"), token=kwargs.get("token"))
+        return {"data": [{"id": "gpt-5.6-sol"}, {"id": "gpt-5.6-luna"}]}
+
+    monkeypatch.setattr(helper, "request_json", fake_request_json)
+    result = helper.check_gateway_key()
+
+    assert result["ok"] is True
+    assert result["payload"]["model_available"] is True
+    # it tested the real gateway path with the config.toml inline token
+    assert seen["method"] == "GET" and seen["path"] == "/models"
+    assert seen["backend_url"] == "https://api.ezyapis.com/v1"
+    assert seen["token"] == "sk-ezyhub-secret"
+    # never leaks the key
+    assert "sk-ezyhub-secret" not in json.dumps(result)
+
+
+def test_check_gateway_key_flags_rejected_key(tmp_path, monkeypatch):
+    helper = load_helper()
+    home = tmp_path / "codex"
+    home.mkdir()
+    (home / "config.toml").write_text(_GATEWAY_CONFIG, encoding="utf-8")
+    monkeypatch.setattr(helper, "codex_home", lambda: home)
+
+    def reject(*a, **k):
+        raise RuntimeError('GET https://api.ezyapis.com/v1/models failed: HTTP 401 {"detail":"invalid key"}')
+
+    monkeypatch.setattr(helper, "request_json", reject)
+    result = helper.check_gateway_key()
+
+    assert result["ok"] is False
+    assert "key-rotate" in result["reason"] or "enroll" in result["reason"]
+    assert "sk-ezyhub-secret" not in json.dumps(result)
+
+
+def test_check_gateway_key_reports_missing_when_not_enrolled(tmp_path, monkeypatch):
+    helper = load_helper()
+    home = tmp_path / "codex"
+    home.mkdir()
+    (home / "config.toml").write_text('model_provider = "openai"\n', encoding="utf-8")
+    monkeypatch.setattr(helper, "codex_home", lambda: home)
+    monkeypatch.setattr(helper, "request_json", lambda *a, **k: (_ for _ in ()).throw(AssertionError("must not call gateway")))
+    result = helper.check_gateway_key()
+    assert result["ok"] is False
+    assert "enroll" in result["reason"]
+
+
+def test_check_gateway_key_not_ready_when_model_unavailable(tmp_path, monkeypatch):
+    helper = load_helper()
+    home = tmp_path / "codex"
+    home.mkdir()
+    (home / "config.toml").write_text(_GATEWAY_CONFIG, encoding="utf-8")
+    monkeypatch.setattr(helper, "codex_home", lambda: home)
+    monkeypatch.setattr(helper, "request_json", lambda *a, **k: {"data": [{"id": "some-other-model"}]})
+    result = helper.check_gateway_key()
+    assert result["ok"] is False
+    assert "gpt-5.6-sol" in result["reason"]

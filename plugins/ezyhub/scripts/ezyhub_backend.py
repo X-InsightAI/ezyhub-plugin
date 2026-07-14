@@ -426,6 +426,10 @@ def apply_mcp_servers(home: Path, servers: list[dict[str, Any]], previous: set[s
 # inline because this helper is stdlib-only and must not import backend code).
 BUNDLE_MAX_FILES = 20
 BUNDLE_MAX_BYTES = 5 * 1024 * 1024
+# Server-synced role bundles use the backend's larger role-skill caps
+# (skillfs.ROLE_BUNDLE_MAX_*); the tight caps above stay for employee uploads.
+ROLE_BUNDLE_MAX_FILES = 120
+ROLE_BUNDLE_MAX_BYTES = 25 * 1024 * 1024
 FILE_MAX_BYTES = 1 * 1024 * 1024
 # Managed skill dir names: used by both the write gate and the removal loop.
 COMPANY_SKILL_NAME_RE = re.compile(r"ezyhub-[A-Za-z0-9._-]+")
@@ -545,14 +549,14 @@ def write_bundle_files(skill_dir: Path, files: list[dict]) -> list[str]:
     files the employee added under skill_dir are left alone. Stale managed files are
     removed separately, driven by the manifest's managed_files tracking.
     """
-    if len(files) > BUNDLE_MAX_FILES:
+    if len(files) > ROLE_BUNDLE_MAX_FILES:
         raise ValueError("too many files in bundle")
     total = 0
     resolved: list[tuple[str, bytes]] = []
     for f in files:
         path, data = decode_bundle_file(f)
         total += len(data)
-        if total > BUNDLE_MAX_BYTES:
+        if total > ROLE_BUNDLE_MAX_BYTES:
             raise ValueError("bundle exceeds byte cap")
         if not _resolves_within(skill_dir, path):
             raise ValueError(f"refusing to write through symlink escaping skill dir: {path}")

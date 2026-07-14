@@ -1977,3 +1977,23 @@ def test_doctor_kb_mcp_ok_when_ready(monkeypatch):
     monkeypatch.delenv("EZYHUB_ADMIN_KEY", raising=False)
     report = helper.build_doctor_report(_doctor_args())
     assert report["checks"]["kb_mcp"]["ok"] is True
+
+
+def test_write_bundle_files_accepts_role_bundle_size(tmp_path):
+    helper = load_helper()
+    files = [
+        {"path": f"scripts/f{i}.py", "content": f"# file {i}", "encoding": "utf-8"}
+        for i in range(80)
+    ] + [{"path": "SKILL.md", "content": "---\nname: x\n---\n", "encoding": "utf-8"}]
+    written = helper.write_bundle_files(tmp_path / "skill", files)
+    assert len(written) == 81
+
+
+def test_write_bundle_files_rejects_oversized_role_bundle(tmp_path):
+    helper = load_helper()
+    files = [
+        {"path": f"f{i}.txt", "content": "x", "encoding": "utf-8"} for i in range(121)
+    ]
+    import pytest as _pytest
+    with _pytest.raises(ValueError):
+        helper.write_bundle_files(tmp_path / "skill", files)

@@ -2,9 +2,12 @@ from __future__ import annotations
 
 import argparse
 import base64
+import os
 import importlib.util
 import json
 import sys
+
+import pytest
 from pathlib import Path
 
 
@@ -1997,3 +2000,70 @@ def test_write_bundle_files_rejects_oversized_role_bundle(tmp_path):
     import pytest as _pytest
     with _pytest.raises(ValueError):
         helper.write_bundle_files(tmp_path / "skill", files)
+
+
+def test_enroll_backend_refreshes_process_key_env(monkeypatch):
+    helper = load_helper()
+    monkeypatch.setenv("EZYHUB_CODEX_KEY", "sk-ezyhub-stale")
+    seen = {}
+
+    def fake_request_json(method, path, **kwargs):
+        if path == "/enroll/sessions":
+            return {"session_id": "s1", "device_secret": "d1", "browser_url": "http://example.invalid"}
+        if path.startswith("/enroll/sessions/"):
+            return {"status": "complete", "key": "sk-ezyhub-new", "role": "engineering"}
+        raise AssertionError(f"unexpected path {path}")
+
+    monkeypatch.setattr(helper, "request_json", fake_request_json)
+    monkeypatch.setattr(helper, "configure_codex_with_key", lambda *a, **k: None)
+    monkeypatch.setattr(helper, "cmd_sync_skills", lambda args: seen.update(env=os.environ.get("EZYHUB_CODEX_KEY")))
+    monkeypatch.setattr(helper, "install_auto_sync", lambda *a, **k: "auto-sync ok")
+    args = argparse.Namespace(
+        backend_url="https://backend", base_url="https://gw/v1", model="gpt-5.6-sol",
+        no_open_browser=True, dev_complete=False, poll_timeout_seconds=1,
+        poll_interval_seconds=0.01, skip_sync_skills=False, skip_auto_sync=False,
+        auto_sync_interval_hours=4,
+    )
+    helper.cmd_enroll_backend(args)
+    assert seen["env"] == "sk-ezyhub-new"
+
+
+def test_sync_skills_401_hint_mentions_stale_env(monkeypatch):
+    helper = load_helper()
+    monkeypatch.setenv("EZYHUB_CODEX_KEY", "sk-ezyhub-stale")
+
+    def fail(*a, **k):
+        raise RuntimeError("GET /skills failed: HTTP 401 {\"detail\":\"invalid key\"}")
+
+    monkeypatch.setattr(helper, "request_json", fail)
+    monkeypatch.setattr(helper, "read_codex_key", lambda: "sk-ezyhub-stale")
+    with pytest.raises(RuntimeError) as err:
+        helper.cmd_sync_skills(argparse.Namespace(backend_url="https://backend"))
+    assert "env -u EZYHUB_CODEX_KEY" in str(err.value)
+
+
+def test_doctor_ready_ignores_skipped_checks(monkeypatch):
+    helper = load_helper()
+    monkeypatch.setattr(helper, "request_json", lambda *a, **k: {"ok": True})
+    monkeypatch.setattr(
+        helper,
+        "request_json_url",
+        lambda url: {"ok": True, "ready": False, "configured": {"a": False, "b": False}},
+    )
+    monkeypatch.delenv("EZYHUB_ADMIN_KEY", raising=False)
+    report = helper.build_doctor_report(_doctor_args())
+    assert report["checks"]["kb_mcp"]["skipped"] is True
+    assert report["ready"] is True
+
+
+def test_doctor_not_ready_when_real_check_fails(monkeypatch):
+    helper = load_helper()
+
+    def fail(*a, **k):
+        raise RuntimeError("backend down")
+
+    monkeypatch.setattr(helper, "request_json", fail)
+    monkeypatch.setattr(helper, "request_json_url", lambda url: {"ok": True, "ready": True})
+    monkeypatch.delenv("EZYHUB_ADMIN_KEY", raising=False)
+    report = helper.build_doctor_report(_doctor_args())
+    assert report["ready"] is False

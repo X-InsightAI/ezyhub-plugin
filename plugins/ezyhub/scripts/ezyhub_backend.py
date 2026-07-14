@@ -608,7 +608,16 @@ def _skip_symlinked_skill_dir(skills_dir: Path, name: str) -> bool:
 
 
 def cmd_sync_skills(args: argparse.Namespace) -> None:
-    payload = request_json("GET", "/skills", backend_url=args.backend_url, token=read_codex_key())
+    try:
+        payload = request_json("GET", "/skills", backend_url=args.backend_url, token=read_codex_key())
+    except RuntimeError as exc:
+        if "HTTP 401" in str(exc) and os.environ.get(CODEX_CLIENT_KEY_ENV):
+            raise RuntimeError(
+                f"{exc}\nHint: this shell exports {CODEX_CLIENT_KEY_ENV}, which may be a stale key "
+                f"that outranks the enrolled one in CODEX_HOME/.env. Retry without it: "
+                f"env -u {CODEX_CLIENT_KEY_ENV} {HELPER_COMMAND} sync-skills"
+            ) from exc
+        raise
     skills = payload.get("skills")
     if not isinstance(skills, list):
         raise RuntimeError("backend returned invalid skills payload")
@@ -967,7 +976,7 @@ def build_doctor_report(args: argparse.Namespace) -> dict[str, Any]:
             checks["kb_mcp"] = {"ok": False, "error": str(exc)}
 
     return {
-        "ready": all(item.get("ok") for item in checks.values()),
+        "ready": all(item.get("ok") for item in checks.values() if not item.get("skipped")),
         "backend_url": args.backend_url,
         "kb_health_url": None if args.no_kb else args.kb_health_url,
         "checks": checks,
@@ -1244,6 +1253,10 @@ def cmd_enroll_backend(args: argparse.Namespace) -> None:
     if not isinstance(key, str) or not key:
         raise RuntimeError("enroll result did not include a key")
     configure_codex_with_key(key, args.base_url, args.model)
+    # An already-running Codex session can carry a stale EZYHUB_CODEX_KEY that
+    # outranks the freshly written .env value; refresh this process (and its
+    # children: sync, auto-sync) so they use the key just issued.
+    os.environ[CODEX_CLIENT_KEY_ENV] = key
     print("Codex provider and key configured.")
     if not args.skip_sync_skills:
         try:

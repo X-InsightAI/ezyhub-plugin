@@ -18,7 +18,7 @@ The agent installs the plugin and runs enrollment. Your only manual step is sign
 
 ```bash
 codex plugin marketplace add https://github.com/X-InsightAI/ezyhub-plugin
-codex plugin add ezyhub@ezyhub
+codex plugin add ezyhub@ezytrail
 ```
 
 Then open a new Codex thread and run `/enroll`.
@@ -44,7 +44,7 @@ Check that the `codex` CLI is available (`codex --version`) and that `git` is on
 
 ```bash
 codex plugin marketplace add https://github.com/X-InsightAI/ezyhub-plugin
-codex plugin add ezyhub@ezyhub
+codex plugin add ezyhub@ezytrail
 ```
 
 **Step 3 — Enroll**
@@ -88,7 +88,7 @@ Once installed, these skills are available in Codex App:
 ## Updating
 
 ```bash
-codex plugin add ezyhub@ezyhub
+codex plugin add ezyhub@ezytrail
 ```
 
 Then open a new Codex thread. Role skills also refresh automatically in the background (default: every 4 hours).

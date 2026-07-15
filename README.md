@@ -89,7 +89,10 @@ The agent tells you when setup is complete — it looks like this:
 
 ![The agent's setup-complete summary](docs/images/06-setup-complete.png)
 
-Now **quit the app completely, then open it again.** (On Mac: Cmd+Q. On Windows: right-click the icon in the taskbar and Quit.)
+Now **close the app completely, then open it again.**
+
+- **Windows:** just closing the window (the ✕ button) is **not** enough — the app keeps running in the background. Right-click the app's icon in the taskbar and choose **"Exit"**.
+- **Mac:** press **Cmd+Q** (or menu bar → Quit).
 
 This restart is how the company AI actually switches on — don't skip it, and don't bother with anything fancier. Restarting is all it takes.
 

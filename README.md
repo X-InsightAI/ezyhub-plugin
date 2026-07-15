@@ -51,7 +51,11 @@ In the app, start a **new chat**.
 Click the **copy button** in the top-right corner of the box (it appears when you hover over it), then paste into the chat and hit send — that's your entire job in this step:
 
 ```text
-Install the EzyHub company plugin. Using shell commands only (no web search): git clone --depth 1 https://github.com/X-InsightAI/ezyhub-plugin into ~/.ezyhub/ezyhub-plugin (Windows: C:\Users\<username>\.ezyhub\ezyhub-plugin — note %USERPROFILE% only expands in cmd, not PowerShell), then read README.md in the clone and follow its "Instructions for AI agents" exactly.
+Install the EzyHub company plugin.
+Using shell commands only (no web search):
+git clone --depth 1 https://github.com/X-InsightAI/ezyhub-plugin into ~/.ezyhub/ezyhub-plugin
+(Windows: C:\Users\<username>\.ezyhub\ezyhub-plugin — %USERPROFILE% only expands in cmd, not PowerShell).
+Then read README.md in the clone and follow its "Instructions for AI agents" exactly.
 ```
 
 Pasted into the chat it looks like this — now hit send:

@@ -1,6 +1,6 @@
 {
   "name": "ezyhub",
-  "version": "1.0.8",
+  "version": "1.0.9",
   "description": "Ezytrail Codex plugin",
   "author": {
     "name": "EzyTrail"
@@ -9,7 +9,7 @@
   "interface": {
     "displayName": "EzyHub",
     "shortDescription": "EzyTrail's company AI: enroll once, get the company model and the skills for your role.",
-    "longDescription": "The official EzyTrail company plugin. Run /enroll once and sign in with your company Google account — this Codex App is then connected to EzyTrail's company AI: a personal company-managed gateway key (your own ChatGPT login stays untouched), the company model, and the skills for your role. Skills sync automatically in the background and always stay up to date. Includes /key-status, /key-rotate, and /sync-skills for everyday self-service.",
+    "longDescription": "The official EzyTrail company plugin. Run /enroll once and sign in with your company Google account — this Codex App is then connected to EzyTrail's company AI: a personal company-managed gateway key (your own ChatGPT login stays untouched), the company model, and the skills for your role. Skills sync automatically in the background and always stay up to date. Includes /key-status and /sync-skills for everyday self-service.",
     "developerName": "EzyTrail",
     "category": "Productivity",
     "capabilities": [

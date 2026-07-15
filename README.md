@@ -166,7 +166,6 @@ Once installed, these skills are available in Codex App:
 | --- | --- |
 | `/enroll` | Enroll this machine with the company gateway (browser sign-in, key issue, skill + MCP sync, auto-sync install) |
 | `/key-status` | Show current enrollment status and key metadata |
-| `/key-rotate` | Rotate the gateway key and reconfigure Codex |
 | `/sync-skills` | Sync role-based company skills into the local Codex skills directory |
 
 ## Updating

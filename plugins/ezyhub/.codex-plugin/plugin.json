@@ -8,8 +8,8 @@
   "skills": "./skills/",
   "interface": {
     "displayName": "EzyHub",
-    "shortDescription": "Company model gateway and role skills.",
-    "longDescription": "Connects Codex App to the EzyHub company platform. /enroll signs you in with your company Google account and issues a managed gateway key (your ChatGPT login stays), switches models to the company gateway, and syncs the skills for your role. Skills stay up to date automatically.",
+    "shortDescription": "EzyTrail's company AI: enroll once, get the company model and the skills for your role.",
+    "longDescription": "The official EzyTrail company plugin. Run /enroll once and sign in with your company Google account — this Codex App is then connected to EzyTrail's company AI: a personal company-managed gateway key (your own ChatGPT login stays untouched), the company model, and the skills for your role. Skills sync automatically in the background and always stay up to date. Includes /key-status, /key-rotate, and /sync-skills for everyday self-service.",
     "developerName": "EzyTrail",
     "category": "Productivity",
     "capabilities": [

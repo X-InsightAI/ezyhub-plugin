@@ -757,7 +757,8 @@ def test_enroll_backend_one_shot_chain(monkeypatch, capsys):
     assert calls == ["configure", "sync", "auto-sync-4"]
     out = capsys.readouterr().out
     assert "AUTO-SYNC-SUMMARY-XYZ" in out
-    assert "Open a new Codex App thread" in out
+    assert "Authorize Codex" in out
+    assert "Quit and reopen Codex App" in out
 
 
 def test_enroll_backend_prints_resume_command_on_sync_failure(monkeypatch, capsys):

@@ -25,6 +25,22 @@ python3 plugins/ezyhub/scripts/ezyhub_backend.py enroll-backend
 
 On Windows, use `python` instead of `python3` if that is the available launcher.
 
+## Guiding the employee through the browser step
+
+While `enroll-backend` runs, talk the employee through the browser step in
+plain, non-technical language:
+
+1. **Browser opens automatically** — tell them a browser window is opening by
+   itself. If they are already signed in to EzyHub with their company Google
+   account, all they do is click **"Authorize Codex"** on the page.
+2. **Browser did not open** — show them the authorization URL the helper
+   printed and tell them to click it or paste it into their browser manually.
+3. **Page asks them to sign in** — that browser is not signed in to EzyHub.
+   Tell them to sign in there with their **company Google account**
+   (`@ezytrail.com.au`), or to copy the link into a browser profile that is
+   already signed in to EzyHub — both work.
+4. **No rush** — the helper waits up to 10 minutes for them to finish.
+
 What happens after the browser step completes:
 
 1. Codex provider/key are configured (see "Mixed-auth provider config" below).
@@ -114,6 +130,8 @@ Google identity verification is owned by the EzyHub app, not by key-backend dire
 5. configure Codex using the returned one-time key result, then sync skills/MCP and install auto-sync (steps 2-3 under "One-shot enroll")
 
 The long-lived CLIProxyAPI key must never appear in browser URLs or logs.
-Open a new Codex App thread after enrollment. If the new thread still sees stale
-skills, tools, or provider config, quit and reopen Codex App. No reboot is
-required.
+
+After enrollment, tell the employee to **quit Codex App completely and reopen
+it** — a full restart is the reliable way to pick up the new provider, key,
+and skills. Do not suggest other reload tricks (reload commands, waiting, new
+thread only); restart first. No machine reboot is required.

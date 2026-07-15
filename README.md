@@ -7,20 +7,83 @@
 
 # EzyHub Codex Plugin
 
-Company plugin marketplace for [Codex App](https://openai.com/codex). Ships the **ezyhub** plugin, which connects your Codex App to the EzyHub company platform:
+> **One thing to know first:** the desktop app we install here is called **ChatGPT** — it's the app that used to be called **Codex**. Same app, new name. You'll still see "Codex" on some pages and buttons; whenever you see either name, it's the same thing.
 
-- **Company model gateway** — enroll once, get a personal gateway key issued and managed by the company control plane
-- **Role-based skills** — company skills for your role, synced automatically and kept up to date
+Set up EzyTrail's company AI on your computer. Four steps, about 10 minutes. You don't need any technical background — an AI agent does all the technical work, and you just sign in and click a couple of buttons.
 
-## Quick Start
+## Step 1 — Sign in to EzyHub (the company website)
 
-The easiest way to install is to paste this to your Codex agent:
+Open your browser and go to **https://ezyhub.ezyapis.com**.
 
-> Install the EzyHub company plugin. Using shell commands only (no web search): `git clone --depth 1 https://github.com/X-InsightAI/ezyhub-plugin` into `~/.ezyhub/ezyhub-plugin` (Windows: `%USERPROFILE%\.ezyhub\ezyhub-plugin`), then read `README.md` in the clone and follow its "Instructions for AI agents" exactly.
+1. Click the **"Sign in with Google"** button.
+2. A Google window pops up asking which account to use. Pick your **company email** — the one ending in `@ezytrail.com.au`. Don't pick a personal Gmail here.
+3. You'll land on the EzyHub home page. That's it — you're signed in.
 
-The agent installs the plugin and runs enrollment. Your only manual step is signing in with your company Google account when the browser opens, then opening a new Codex thread at the end.
+Already signed in? Great, go straight to Step 2.
 
-### Manual install
+> Why this step matters: in Step 3, EzyHub checks this login to confirm you really work at EzyTrail. Signing in now makes Step 3 a single click.
+
+![Sign in to EzyHub with your company Google account](docs/images/01-ezyhub-sign-in.png)
+
+## Step 2 — Install the ChatGPT (Codex) desktop app
+
+This is the app where you'll talk to your AI agent (remember: ChatGPT = the old Codex).
+
+1. Download it from **https://openai.com/codex** and install it like any normal app.
+2. Open it and sign in with a ChatGPT account. **Any account works** — personal or company Gmail, your choice. (Bonus: this same login later lets you control your computer from the ChatGPT app on your phone.)
+
+![Download and sign in to the Codex desktop app](docs/images/02-codex-sign-in.png)
+
+3. **First time only — set up the sandbox.** The first time you open the app, a bar appears above the message box saying **"Set up Agent sandbox to continue"**. Click the **"Set up"** button.
+
+   ![Set up Agent sandbox to continue](docs/images/02b-sandbox-setup.webp)
+
+   On **Windows**, your computer then shows a permission popup ("Do you want to allow this app to make changes to your device?") — click **Yes**. That's the whole setup: it creates the safe, walled-off workspace the AI works inside, so it can't touch anything it shouldn't. On **Mac**, you won't see a permission popup — just click Set up and you're done.
+
+Already have the app, signed in, sandbox set up? Go to Step 3.
+
+## Step 3 — Ask the agent to set up the EzyHub plugin
+
+In the app, start a **new chat**, then copy the whole gray block below and paste it as your message:
+
+> Install the EzyHub company plugin. Using shell commands only (no web search): `git clone --depth 1 https://github.com/X-InsightAI/ezyhub-plugin` into `~/.ezyhub/ezyhub-plugin` (Windows: `C:\Users\<username>\.ezyhub\ezyhub-plugin` — note `%USERPROFILE%` only expands in cmd, not PowerShell), then read `README.md` in the clone and follow its "Instructions for AI agents" exactly.
+
+Now sit back — the agent does everything. It will only need you twice:
+
+**1. It will ask permission to run commands — sometimes more than once. Approve everything it asks** (click **"Approve"** or **"Allow"**). The agent needs these permissions to download and set up the plugin. This is normal and safe.
+
+![Approve the network command](docs/images/03-approve-command.png)
+
+**2. A browser window opens by itself, showing an EzyHub page with a big "Authorize Codex" button. Click it.**
+Because you signed in during Step 1, this is just one click.
+
+![Click Authorize Codex](docs/images/04-authorize.png)
+
+Small hiccups, easy fixes:
+
+- **No browser window appeared?** No problem — the agent also shows the authorization link in the chat. Click that link, or copy it into your browser yourself.
+- **The page asks you to sign in first?** That browser isn't signed in to EzyHub yet. Sign in with your company email (exactly like Step 1), and the Authorize button appears. Or copy the link into the browser (or browser profile) where you already signed in — that works too.
+- **Took you a while?** Relax — the agent waits up to 10 minutes for you.
+
+After you click Authorize, the page confirms it, and the agent finishes the rest on its own.
+
+![Authorization complete](docs/images/05-authorized.png)
+
+## Step 4 — Restart the app
+
+The agent tells you when setup is complete — it looks like this:
+
+![The agent's setup-complete summary](docs/images/06-setup-complete.png)
+
+Now **quit the app completely, then open it again.** (On Mac: Cmd+Q. On Windows: right-click the icon in the taskbar and Quit.)
+
+This restart is how the company AI actually switches on — don't skip it, and don't bother with anything fancier. Restarting is all it takes.
+
+You're done 🎉 Every new chat now runs on the company AI, and the company skills for your role appear automatically and stay up to date in the background.
+
+---
+
+## Manual install
 
 ```bash
 codex plugin marketplace add https://github.com/X-InsightAI/ezyhub-plugin
@@ -55,7 +118,7 @@ codex plugin add ezyhub@ezytrail
 
 **Step 3 — Enroll**
 
-Run the one-shot enroll helper from the clone of this repository (clone it now if you haven't already). The clone must be at a persistent location such as `~/.ezyhub/ezyhub-plugin`, not a temporary directory: the auto-sync job installed at the end keeps running the helper from this path.
+Run the one-shot enroll helper from the clone of this repository (clone it now if you haven't already). The clone must be at a persistent location such as `~/.ezyhub/ezyhub-plugin` (Windows: `C:\Users\<username>\.ezyhub\ezyhub-plugin`; `%USERPROFILE%` does not expand in PowerShell), not a temporary directory: the auto-sync job installed at the end records this path and keeps running the helper from it.
 
 ```bash
 git clone --depth 1 https://github.com/X-InsightAI/ezyhub-plugin ~/.ezyhub/ezyhub-plugin
@@ -63,7 +126,13 @@ cd ~/.ezyhub/ezyhub-plugin
 python3 plugins/ezyhub/scripts/ezyhub_backend.py enroll-backend
 ```
 
-A browser window opens. Tell the user to sign in with their **company Google account** and click **"Authorize Codex"**. The script waits for them and then finishes on its own: it configures the Codex provider and key, syncs role skills, and installs a background auto-sync job.
+A browser window opens automatically. Guide the user through it in plain language:
+
+- If they are already signed in to EzyHub with their company Google account, they only need to click **"Authorize Codex"**.
+- If no browser window opened, show them the authorization URL the helper printed so they can open it manually.
+- If the page asks them to sign in, tell them to sign in with their **company Google account** — or to copy the link into a browser profile that is already signed in to EzyHub.
+
+The helper waits up to 10 minutes for them and then finishes on its own: it configures the Codex provider and key, syncs role skills, and installs a background auto-sync job.
 
 If enrollment fails partway after the key is configured, the helper prints the exact resume command (`sync-skills` or `install-auto-sync`). Run that printed command — do not invent a different recovery.
 
@@ -77,7 +146,7 @@ This live-tests the enrolled key against the company model gateway (the `gateway
 
 **Step 5 — Hand back to the user**
 
-Tell the user: **open a new Codex thread** (or quit and reopen Codex App). The new provider, skills, and MCP tools are only picked up by new threads. Enrollment is complete.
+Tell the user: **quit Codex App fully and reopen it**. A full restart is the reliable way to pick up the new provider, key, and skills — do not suggest other reload tricks. Enrollment is complete.
 
 ## Skills
 

@@ -1277,9 +1277,13 @@ def cmd_key_rotate(args: argparse.Namespace) -> None:
 
 def cmd_enroll_backend(args: argparse.Namespace) -> None:
     created = request_json("POST", "/enroll/sessions", backend_url=args.backend_url)
-    print(f"Open this URL to enroll: {created['browser_url']}")
+    print("A browser window is opening for EzyHub authorization.")
+    print("If you are already signed in to EzyHub with your company Google account, just click \"Authorize Codex\".")
+    print(f"If no window opened, open this link yourself: {created['browser_url']}")
+    print("If the page asks you to sign in, use your company Google account — or copy the link into a browser profile already signed in to EzyHub.")
     if not args.no_open_browser:
         webbrowser.open(created["browser_url"])
+    print(f"Waiting for authorization (up to {args.poll_timeout_seconds // 60} minutes)...")
     if args.dev_complete:
         body: dict[str, Any] = {
             "session_id": created["session_id"],
@@ -1334,7 +1338,7 @@ def cmd_enroll_backend(args: argparse.Namespace) -> None:
             print(f"Enrollment step failed: auto-sync install. Resume with: {HELPER_COMMAND} install-auto-sync")
             raise
     role = result.get("role")
-    print(f"Enrolled{f' with role {role}' if role else ''}. Open a new Codex App thread to pick up the new configuration.")
+    print(f"Enrolled{f' with role {role}' if role else ''}. Quit and reopen Codex App to pick up the new configuration.")
 
 
 def parse_args() -> argparse.Namespace:

@@ -15,7 +15,7 @@ Set up EzyTrail's company AI on your computer. Four steps, about 10 minutes. You
 
 Open your browser and go to **https://ezyhub.ezyapis.com**.
 
-1. Click the **"Sign in with Google"** button.
+1. Click the **"Google"** button (below "Or continue with").
 2. A Google window pops up asking which account to use. Pick your **company email** — the one ending in `@ezytrail.com.au`. Don't pick a personal Gmail here.
 3. You'll land on the EzyHub home page. That's it — you're signed in.
 

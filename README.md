@@ -54,6 +54,10 @@ Click the **copy button** in the top-right corner of the box (it appears when yo
 Install the EzyHub company plugin. Using shell commands only (no web search): git clone --depth 1 https://github.com/X-InsightAI/ezyhub-plugin into ~/.ezyhub/ezyhub-plugin (Windows: C:\Users\<username>\.ezyhub\ezyhub-plugin — note %USERPROFILE% only expands in cmd, not PowerShell), then read README.md in the clone and follow its "Instructions for AI agents" exactly.
 ```
 
+Pasted into the chat it looks like this — now hit send:
+
+![The instruction pasted into the chat, ready to send](docs/images/03-paste-instruction.png)
+
 Now sit back — the agent does everything. It will only need you twice:
 
 **1. It will ask permission to run commands — sometimes more than once. Approve everything it asks** (click **"Approve"** or **"Allow"**). The agent needs these permissions to download and set up the plugin. This is normal and safe.

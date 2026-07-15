@@ -17,11 +17,17 @@ macOS/Linux or `python` on Windows.
 
 ## One-shot enroll
 
-`enroll-backend` is one command that does the whole enrollment chain: it creates the enroll session, opens the browser, waits for the employee to complete Google sign-in and click "Authorize Codex" in EzyHub, then configures Codex, syncs role skills, and installs a background auto-sync job — all in one run.
+`enroll-backend` does the whole enrollment chain: it creates the enroll session, opens the browser, waits for the employee to complete Google sign-in and click "Authorize Codex" in EzyHub, then configures Codex, syncs role skills, and installs a background auto-sync job.
+
+**Agents must run it as two commands** (a blocking one-shot run holds the authorization link hostage until it exits — you would never get to show it):
 
 ```bash
-python3 plugins/ezyhub/scripts/ezyhub_backend.py enroll-backend
+python3 plugins/ezyhub/scripts/ezyhub_backend.py enroll-backend --start
+# returns immediately; paste the printed AUTHORIZATION LINK into your chat reply, then:
+python3 plugins/ezyhub/scripts/ezyhub_backend.py enroll-backend --wait
 ```
+
+`--start` creates the session, opens the browser, prints the link, and exits. `--wait` resumes that session: it waits for authorization (up to 10 minutes) and then runs the rest of the chain (configure, sync, auto-sync). Plain `enroll-backend` without flags still does everything in one blocking run — fine for a human at a terminal, wrong for agents.
 
 On Windows, use `python` instead of `python3` if that is the available launcher.
 
@@ -49,9 +55,9 @@ plain, non-technical language:
    the browser profile that is already signed in to EzyHub — both work.
 4. **No rush** — the helper waits up to 10 minutes for them to finish.
 
-Run the helper so its output streams live (interactive terminal / unbuffered);
-if you only see output after the command ends, rerun it interactively — the
-link is useless once the wait is over.
+The two-step `--start` / `--wait` flow exists precisely because shell output
+often only reaches you after a command exits — `--start` exits immediately, so
+the link is always in your hands before the waiting begins.
 
 What happens after the browser step completes:
 

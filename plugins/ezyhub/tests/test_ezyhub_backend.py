@@ -784,6 +784,62 @@ def test_enroll_backend_prints_resume_command_on_sync_failure(monkeypatch, capsy
     assert "Resume with:" in out and "sync-skills" in out and "install-auto-sync" in out
 
 
+def test_enroll_backend_start_prints_link_and_saves_session(tmp_path, monkeypatch, capsys):
+    helper = load_helper()
+    monkeypatch.setenv("CODEX_HOME", str(tmp_path))
+    monkeypatch.setattr(helper, "request_json", lambda method, path, **k: {
+        "POST /enroll/sessions": {"session_id": "s1", "device_secret": "d1", "browser_url": "https://hub/codex/enroll?session_id=s1"},
+    }[f"{method} {path}"])
+    args = argparse.Namespace(
+        backend_url="https://b", no_open_browser=True, dev_complete=False,
+        start=True, wait=False,
+        poll_timeout_seconds=1, poll_interval_seconds=0.01,
+        base_url="https://gw/v1", model="gpt-5.6-sol",
+        skip_sync_skills=False, skip_auto_sync=False, auto_sync_interval_hours=4,
+    )
+    helper.cmd_enroll_backend(args)
+    out = capsys.readouterr().out
+    assert "AUTHORIZATION LINK" in out and "https://hub/codex/enroll?session_id=s1" in out
+    assert "--wait" in out
+    state = json.loads((tmp_path / ".ezyhub-enroll-session.json").read_text())
+    assert state["session_id"] == "s1" and state["device_secret"] == "d1"
+
+
+def test_enroll_backend_wait_resumes_saved_session_and_cleans_up(tmp_path, monkeypatch, capsys):
+    helper = load_helper()
+    monkeypatch.setenv("CODEX_HOME", str(tmp_path))
+    (tmp_path / ".ezyhub-enroll-session.json").write_text(
+        json.dumps({"session_id": "s1", "device_secret": "d1", "browser_url": "https://hub/x"})
+    )
+    calls = []
+    monkeypatch.setattr(helper, "request_json", lambda method, path, **k: {
+        "GET /enroll/sessions/s1/result": {"status": "complete", "key": "sk-k", "employee_id": 1, "role": "default"},
+    }[f"{method} {path}"])
+    monkeypatch.setattr(helper, "configure_codex_with_key", lambda *a: calls.append("configure"))
+    monkeypatch.setattr(helper, "cmd_sync_skills", lambda a: calls.append("sync"))
+    monkeypatch.setattr(helper, "install_auto_sync", lambda h, u: "AUTO-SYNC-OK")
+    args = argparse.Namespace(
+        backend_url="https://b", no_open_browser=True, dev_complete=False,
+        start=False, wait=True,
+        poll_timeout_seconds=1, poll_interval_seconds=0.01,
+        base_url="https://gw/v1", model="gpt-5.6-sol",
+        skip_sync_skills=False, skip_auto_sync=False, auto_sync_interval_hours=4,
+    )
+    helper.cmd_enroll_backend(args)
+    assert calls == ["configure", "sync"]
+    assert not (tmp_path / ".ezyhub-enroll-session.json").exists()
+    assert "Quit and reopen Codex App" in capsys.readouterr().out
+
+
+def test_enroll_backend_wait_without_start_errors(tmp_path, monkeypatch):
+    helper = load_helper()
+    monkeypatch.setenv("CODEX_HOME", str(tmp_path))
+    import pytest
+    args = argparse.Namespace(backend_url="https://b", wait=True)
+    with pytest.raises(RuntimeError, match="--start"):
+        helper.cmd_enroll_backend(args)
+
+
 def test_employee_defaults_use_public_domains():
     helper = load_helper()
     configure = load_configure_helper()

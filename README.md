@@ -135,21 +135,29 @@ codex plugin add ezyhub@ezytrail
 
 **Step 3 — Enroll**
 
-Run the one-shot enroll helper from the clone of this repository (clone it now if you haven't already). The clone must be at a persistent location such as `~/.ezyhub/ezyhub-plugin` (Windows: `C:\Users\<username>\.ezyhub\ezyhub-plugin`; `%USERPROFILE%` does not expand in PowerShell), not a temporary directory: the auto-sync job installed at the end records this path and keeps running the helper from it.
+Run the enroll helper from the clone of this repository (clone it now if you haven't already). The clone must be at a persistent location such as `~/.ezyhub/ezyhub-plugin` (Windows: `C:\Users\<username>\.ezyhub\ezyhub-plugin`; `%USERPROFILE%` does not expand in PowerShell), not a temporary directory: the auto-sync job installed at the end records this path and keeps running the helper from it.
+
+Enrollment is **two commands**, in this order:
 
 ```bash
 git clone --depth 1 https://github.com/X-InsightAI/ezyhub-plugin ~/.ezyhub/ezyhub-plugin
 cd ~/.ezyhub/ezyhub-plugin
-python3 plugins/ezyhub/scripts/ezyhub_backend.py enroll-backend
+python3 plugins/ezyhub/scripts/ezyhub_backend.py enroll-backend --start
 ```
 
-A browser window opens automatically. Guide the user through it in plain language:
+`--start` returns immediately: it opens the browser and prints the `AUTHORIZATION LINK`. **Stop and paste that link into your chat reply now** (see the REQUIRED bullet below). Only after your reply shows the link, run:
+
+```bash
+python3 plugins/ezyhub/scripts/ezyhub_backend.py enroll-backend --wait
+```
+
+`--wait` waits for the user to authorize (up to 10 minutes) and then finishes everything on its own: configures the Codex provider and key, syncs role skills, and installs the background auto-sync job. Do not run plain `enroll-backend` (without flags) — it blocks until authorization and you will not see the link in time to show the user.
+
+Guide the user through the browser step in plain language:
 
 - **REQUIRED — your reply must contain the link.** The helper prints a line starting with `AUTHORIZATION LINK`. The moment you see it, your very next chat message MUST include that URL verbatim, as a clickable markdown link on its own line, before anything else. This is mandatory every time, even when the browser opened fine. Opening the URL yourself (Start-Process, `open`, webbrowser, etc.) does **not** satisfy this requirement — the browser often opens in a profile that is not signed in to EzyHub, and the link in your reply is the only way the user can reopen it in the right profile. If your reply does not show the URL, this step is not done. (The link is not a secret: one-time session id only, never a key.)
 - If they are already signed in to EzyHub with their company Google account, they only need to click **"Authorize Codex"**.
 - If the page asks them to sign in, tell them to sign in with their **company Google account** — or to copy the link from your chat message into a browser profile that is already signed in to EzyHub.
-
-The helper waits up to 10 minutes for them and then finishes on its own: it configures the Codex provider and key, syncs role skills, and installs a background auto-sync job.
 
 If enrollment fails partway after the key is configured, the helper prints the exact resume command (`sync-skills` or `install-auto-sync`). Run that printed command — do not invent a different recovery.
 

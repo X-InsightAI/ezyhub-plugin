@@ -1275,8 +1275,25 @@ def cmd_key_rotate(args: argparse.Namespace) -> None:
     configure_codex_with_key(key, args.base_url, args.model)
 
 
-def cmd_enroll_backend(args: argparse.Namespace) -> None:
+def enroll_session_path() -> Path:
+    return codex_home() / ".ezyhub-enroll-session.json"
+
+
+def _enroll_start(args: argparse.Namespace, save_state: bool) -> dict[str, Any]:
     created = request_json("POST", "/enroll/sessions", backend_url=args.backend_url)
+    if save_state:
+        path = enroll_session_path()
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text(
+            json.dumps(
+                {
+                    "session_id": created["session_id"],
+                    "device_secret": created["device_secret"],
+                    "browser_url": created["browser_url"],
+                }
+            )
+        )
+        os.chmod(path, 0o600)
     # flush=True: agents often run this in a non-interactive shell where stdout is
     # block-buffered; without flushing, the authorization URL stays invisible until
     # the helper exits — exactly when it is no longer useful.
@@ -1287,6 +1304,30 @@ def cmd_enroll_backend(args: argparse.Namespace) -> None:
     print("If no window opened — or the browser that opened is not signed in to EzyHub — open this link in a browser profile signed in with the company Google account.", flush=True)
     if not args.no_open_browser:
         webbrowser.open(created["browser_url"])
+    return created
+
+
+def cmd_enroll_backend(args: argparse.Namespace) -> None:
+    if getattr(args, "wait", False):
+        path = enroll_session_path()
+        if not path.exists():
+            raise RuntimeError(
+                f"no pending enroll session found; run '{HELPER_COMMAND} enroll-backend --start' first"
+            )
+        created = json.loads(path.read_text())
+        _enroll_wait(args, created)
+        return
+    created = _enroll_start(args, save_state=bool(getattr(args, "start", False)))
+    if getattr(args, "start", False):
+        print(
+            f"Enroll session started. After showing the user the link, run: {HELPER_COMMAND} enroll-backend --wait",
+            flush=True,
+        )
+        return
+    _enroll_wait(args, created)
+
+
+def _enroll_wait(args: argparse.Namespace, created: dict[str, Any]) -> None:
     print(f"Waiting for authorization (up to {args.poll_timeout_seconds // 60} minutes)...", flush=True)
     if args.dev_complete:
         body: dict[str, Any] = {
@@ -1322,6 +1363,7 @@ def cmd_enroll_backend(args: argparse.Namespace) -> None:
     if not isinstance(key, str) or not key:
         raise RuntimeError("enroll result did not include a key")
     configure_codex_with_key(key, args.base_url, args.model)
+    enroll_session_path().unlink(missing_ok=True)
     # read_codex_key reads the freshly written CODEX_HOME/.env directly (not the
     # process env), so the in-process sync below and future runs use this new key.
     print("Codex provider and key configured.")
@@ -1390,6 +1432,8 @@ def parse_args() -> argparse.Namespace:
     enroll.add_argument("--dev-google-email", default="dev@example.com")
     enroll.add_argument("--dev-name", default="Dev User")
     enroll.add_argument("--dev-role", default="engineering")
+    enroll.add_argument("--start", action="store_true", help="create the session, print the authorization link, and exit immediately")
+    enroll.add_argument("--wait", action="store_true", help="resume a --start session: wait for authorization, then configure/sync")
     enroll.add_argument("--no-open-browser", action="store_true")
     enroll.add_argument("--skip-sync-skills", action="store_true")
     enroll.add_argument("--skip-auto-sync", action="store_true")

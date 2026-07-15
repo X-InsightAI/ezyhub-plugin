@@ -44,9 +44,15 @@ Already have the app, signed in, sandbox set up? Go to Step 3.
 
 ## Step 3 — Ask the agent to set up the EzyHub plugin
 
-In the app, start a **new chat**, then copy the whole gray block below and paste it as your message:
+In the app, start a **new chat**.
 
-> Install the EzyHub company plugin. Using shell commands only (no web search): `git clone --depth 1 https://github.com/X-InsightAI/ezyhub-plugin` into `~/.ezyhub/ezyhub-plugin` (Windows: `C:\Users\<username>\.ezyhub\ezyhub-plugin` — note `%USERPROFILE%` only expands in cmd, not PowerShell), then read `README.md` in the clone and follow its "Instructions for AI agents" exactly.
+### 👇 Copy this message and send it to the agent
+
+Click the **copy button** in the top-right corner of the box (it appears when you hover over it), then paste into the chat and hit send — that's your entire job in this step:
+
+```text
+Install the EzyHub company plugin. Using shell commands only (no web search): git clone --depth 1 https://github.com/X-InsightAI/ezyhub-plugin into ~/.ezyhub/ezyhub-plugin (Windows: C:\Users\<username>\.ezyhub\ezyhub-plugin — note %USERPROFILE% only expands in cmd, not PowerShell), then read README.md in the clone and follow its "Instructions for AI agents" exactly.
+```
 
 Now sit back — the agent does everything. It will only need you twice:
 

@@ -30,13 +30,16 @@ On Windows, use `python` instead of `python3` if that is the available launcher.
 While `enroll-backend` runs, talk the employee through the browser step in
 plain, non-technical language:
 
-1. **Always show the authorization link in the chat, immediately.** The helper
-   prints it on a line starting with `AUTHORIZATION LINK`. Paste that URL into
-   your reply as a clickable link **every time, even when the browser opened
-   fine** — the browser often opens in a profile that is not signed in to
-   EzyHub, and the chat link is the only way the employee can reopen it in the
-   right profile. The link is not a secret (it carries only a one-time session
-   id, never a key).
+1. **REQUIRED — your reply must contain the link.** The helper prints a line
+   starting with `AUTHORIZATION LINK`. The moment you see it, your very next
+   chat message MUST include that URL verbatim, as a clickable markdown link on
+   its own line, before anything else you say. This is mandatory every time,
+   even when the browser opened fine. Opening the URL yourself (Start-Process,
+   `open`, webbrowser, etc.) does **not** satisfy this requirement — the
+   browser often opens in a profile that is not signed in to EzyHub, and the
+   link in your reply is the only way the employee can reopen it in the right
+   profile. If your reply does not show the URL, this step is not done. The
+   link is not a secret (one-time session id only, never a key).
 2. **Browser opens automatically** — tell them a browser window is opening by
    itself. If they are already signed in to EzyHub with their company Google
    account, all they do is click **"Authorize Codex"** on the page.

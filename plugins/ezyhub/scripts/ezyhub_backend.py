@@ -1283,6 +1283,7 @@ def cmd_enroll_backend(args: argparse.Namespace) -> None:
     print("A browser window is opening for EzyHub authorization.", flush=True)
     print("If you are already signed in to EzyHub with your company Google account, just click \"Authorize Codex\".", flush=True)
     print(f"AUTHORIZATION LINK (safe to share with the user): {created['browser_url']}", flush=True)
+    print("AGENT: you MUST paste the authorization link above into your next chat reply as a clickable link. Opening the browser yourself is NOT a substitute — the browser often opens in a profile that is not signed in to EzyHub, and the user needs the link from your reply to open it in the right profile. The link is not a secret.", flush=True)
     print("If no window opened — or the browser that opened is not signed in to EzyHub — open this link in a browser profile signed in with the company Google account.", flush=True)
     if not args.no_open_browser:
         webbrowser.open(created["browser_url"])

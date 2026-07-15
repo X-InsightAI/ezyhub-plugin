@@ -145,7 +145,7 @@ python3 plugins/ezyhub/scripts/ezyhub_backend.py enroll-backend
 
 A browser window opens automatically. Guide the user through it in plain language:
 
-- **Always paste the authorization link into the chat immediately** — the helper prints it on a line starting with `AUTHORIZATION LINK`. Do this every time, even when the browser opened: it often opens in a profile that is not signed in to EzyHub, and your chat message is the only place the user can grab the link to reopen it in the right profile. The link is not a secret (one-time session id only, never a key).
+- **REQUIRED — your reply must contain the link.** The helper prints a line starting with `AUTHORIZATION LINK`. The moment you see it, your very next chat message MUST include that URL verbatim, as a clickable markdown link on its own line, before anything else. This is mandatory every time, even when the browser opened fine. Opening the URL yourself (Start-Process, `open`, webbrowser, etc.) does **not** satisfy this requirement — the browser often opens in a profile that is not signed in to EzyHub, and the link in your reply is the only way the user can reopen it in the right profile. If your reply does not show the URL, this step is not done. (The link is not a secret: one-time session id only, never a key.)
 - If they are already signed in to EzyHub with their company Google account, they only need to click **"Authorize Codex"**.
 - If the page asks them to sign in, tell them to sign in with their **company Google account** — or to copy the link from your chat message into a browser profile that is already signed in to EzyHub.
 

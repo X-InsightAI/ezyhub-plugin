@@ -142,9 +142,9 @@ python3 plugins/ezyhub/scripts/ezyhub_backend.py enroll-backend
 
 A browser window opens automatically. Guide the user through it in plain language:
 
+- **Always paste the authorization link into the chat immediately** — the helper prints it on a line starting with `AUTHORIZATION LINK`. Do this every time, even when the browser opened: it often opens in a profile that is not signed in to EzyHub, and your chat message is the only place the user can grab the link to reopen it in the right profile. The link is not a secret (one-time session id only, never a key).
 - If they are already signed in to EzyHub with their company Google account, they only need to click **"Authorize Codex"**.
-- If no browser window opened, show them the authorization URL the helper printed so they can open it manually.
-- If the page asks them to sign in, tell them to sign in with their **company Google account** — or to copy the link into a browser profile that is already signed in to EzyHub.
+- If the page asks them to sign in, tell them to sign in with their **company Google account** — or to copy the link from your chat message into a browser profile that is already signed in to EzyHub.
 
 The helper waits up to 10 minutes for them and then finishes on its own: it configures the Codex provider and key, syncs role skills, and installs a background auto-sync job.
 

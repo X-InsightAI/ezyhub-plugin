@@ -1277,13 +1277,16 @@ def cmd_key_rotate(args: argparse.Namespace) -> None:
 
 def cmd_enroll_backend(args: argparse.Namespace) -> None:
     created = request_json("POST", "/enroll/sessions", backend_url=args.backend_url)
-    print("A browser window is opening for EzyHub authorization.")
-    print("If you are already signed in to EzyHub with your company Google account, just click \"Authorize Codex\".")
-    print(f"If no window opened, open this link yourself: {created['browser_url']}")
-    print("If the page asks you to sign in, use your company Google account — or copy the link into a browser profile already signed in to EzyHub.")
+    # flush=True: agents often run this in a non-interactive shell where stdout is
+    # block-buffered; without flushing, the authorization URL stays invisible until
+    # the helper exits — exactly when it is no longer useful.
+    print("A browser window is opening for EzyHub authorization.", flush=True)
+    print("If you are already signed in to EzyHub with your company Google account, just click \"Authorize Codex\".", flush=True)
+    print(f"AUTHORIZATION LINK (safe to share with the user): {created['browser_url']}", flush=True)
+    print("If no window opened — or the browser that opened is not signed in to EzyHub — open this link in a browser profile signed in with the company Google account.", flush=True)
     if not args.no_open_browser:
         webbrowser.open(created["browser_url"])
-    print(f"Waiting for authorization (up to {args.poll_timeout_seconds // 60} minutes)...")
+    print(f"Waiting for authorization (up to {args.poll_timeout_seconds // 60} minutes)...", flush=True)
     if args.dev_complete:
         body: dict[str, Any] = {
             "session_id": created["session_id"],

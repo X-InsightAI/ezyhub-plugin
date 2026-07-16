@@ -1303,7 +1303,12 @@ def _enroll_start(args: argparse.Namespace, save_state: bool) -> dict[str, Any]:
     print("AGENT: you MUST paste the authorization link above into your next chat reply as a clickable link. Opening the browser yourself is NOT a substitute — the browser often opens in a profile that is not signed in to EzyHub, and the user needs the link from your reply to open it in the right profile. The link is not a secret.", flush=True)
     print("If no window opened — or the browser that opened is not signed in to EzyHub — open this link in a browser profile signed in with the company Google account.", flush=True)
     if not args.no_open_browser:
-        webbrowser.open(created["browser_url"])
+        try:
+            opened = webbrowser.open(created["browser_url"])
+        except Exception:
+            opened = False
+        if not opened:
+            print("(Could not auto-open a browser from here — sandboxed shells usually can't. Use the link above.)", flush=True)
     return created
 
 

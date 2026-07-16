@@ -126,6 +126,8 @@ You are installing a company plugin on an employee machine. Follow these steps e
 
 Check that the `codex` CLI is available (`codex --version`) and that `git` is on PATH. On Windows the CLI ships inside Codex App and is usually **not** on PATH — use the newest version directory under `%LOCALAPPDATA%\OpenAI\Codex\bin\<version>\codex.exe` and call it by full path. Only if Codex App itself is not installed, stop and tell the user to install it first.
 
+On a fresh **macOS** machine, `git` (and the other developer tools this flow needs) may fail with an `xcode-select` error — Apple ships them only with the Command Line Tools. Ask the user to run `xcode-select --install` in Terminal, click **Install** in the popup (a few minutes, one-time, not the full Xcode), then continue from where you left off.
+
 **Step 2 — Install the plugin**
 
 ```bash

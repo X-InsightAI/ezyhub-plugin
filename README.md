@@ -38,7 +38,7 @@ This is the app where you'll talk to your AI agent (remember: ChatGPT = the old 
 
    First time you open the app, a bar above the message box says **"Set up Agent sandbox to continue"**:
 
-   ![Set up Agent sandbox to continue](docs/images/02b-sandbox-setup.webp)
+   ![Set up Agent sandbox to continue](docs/images/02b-sandbox-setup.png)
 
    1. Click **"Set up"**.
    2. Windows asks for permission — click **"Yes"**.

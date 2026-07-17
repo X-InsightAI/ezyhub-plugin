@@ -34,11 +34,15 @@ This is the app where you'll talk to your AI agent (remember: ChatGPT = the old 
 
 ![Download and sign in to the Codex desktop app](docs/images/02-codex-sign-in.png)
 
-3. **First time only — set up the sandbox.** The first time you open the app, a bar appears above the message box saying **"Set up Agent sandbox to continue"**. Click the **"Set up"** button.
+3. **Windows only, first time — set up the sandbox.** (On **Mac** this step doesn't exist — you won't see any of this. Skip straight to Step 3.)
+
+   The first time you open the app on Windows, a bar appears above the message box saying **"Set up Agent sandbox to continue"**. Click the **"Set up"** button.
 
    ![Set up Agent sandbox to continue](docs/images/02b-sandbox-setup.webp)
 
-   On **Windows**, your computer then shows a permission popup ("Do you want to allow this app to make changes to your device?") — click **Yes**. That's the whole setup: it creates the safe, walled-off workspace the AI works inside, so it can't touch anything it shouldn't. On **Mac**, you won't see a permission popup — just click Set up and you're done.
+   Your computer then shows a permission popup ("Do you want to allow this app to make changes to your device?") — click **Yes**. That's the whole setup: it creates the safe, walled-off workspace the AI works inside, so it can't touch anything it shouldn't.
+
+   **One more step: restart the app after the sandbox is set up.** The sandbox only switches on after a full restart. Right-click the app's icon in the **taskbar** and choose **"Exit"** — just clicking the ✕ button is **not** enough, the app keeps running in the background — then open the app again. If you skip this, the agent's commands in Step 3 will fail.
 
 Already have the app, signed in, sandbox set up? Go to Step 3.
 
@@ -125,6 +129,8 @@ You are installing a company plugin on an employee machine. Follow these steps e
 **Step 1 — Prerequisites**
 
 Check that the `codex` CLI is available (`codex --version`) and that `git` is on PATH. On Windows the CLI ships inside Codex App and is usually **not** on PATH — use the newest version directory under `%LOCALAPPDATA%\OpenAI\Codex\bin\<version>\codex.exe` and call it by full path. Only if Codex App itself is not installed, stop and tell the user to install it first.
+
+On **Windows**, if your shell commands fail immediately with sandbox errors and the user has only just set up the Agent sandbox, the sandbox needs a full app restart to activate. Tell the user exactly how: right-click the ChatGPT/Codex icon in the **taskbar** and choose **"Exit"** (closing the window with ✕ is not enough — the app keeps running in the background), then reopen the app, start a new chat, and re-send the install message. Do not keep retrying commands in the current chat.
 
 On a fresh **macOS** machine, `git` (and the other developer tools this flow needs) may fail with an `xcode-select` error — Apple ships them only with the Command Line Tools. Ask the user to run `xcode-select --install` in Terminal, click **Install** in the popup (a few minutes, one-time, not the full Xcode), then continue from where you left off.
 

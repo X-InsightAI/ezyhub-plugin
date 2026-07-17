@@ -34,15 +34,15 @@ This is the app where you'll talk to your AI agent (remember: ChatGPT = the old 
 
 ![Download and sign in to the Codex desktop app](docs/images/02-codex-sign-in.png)
 
-3. **Windows only, first time — set up the sandbox.** (On **Mac** this step doesn't exist — you won't see any of this. Skip straight to Step 3.)
+3. **Windows only — set up the sandbox** (Mac users: skip to Step 3).
 
-   The first time you open the app on Windows, a bar appears above the message box saying **"Set up Agent sandbox to continue"**. Click the **"Set up"** button.
+   First time you open the app, a bar above the message box says **"Set up Agent sandbox to continue"**:
 
    ![Set up Agent sandbox to continue](docs/images/02b-sandbox-setup.webp)
 
-   Your computer then shows a permission popup ("Do you want to allow this app to make changes to your device?") — click **Yes**. That's the whole setup: it creates the safe, walled-off workspace the AI works inside, so it can't touch anything it shouldn't.
-
-   **One more step: restart the app after the sandbox is set up.** The sandbox only switches on after a full restart. Right-click the app's icon in the **taskbar** and choose **"Exit"** — just clicking the ✕ button is **not** enough, the app keeps running in the background — then open the app again. If you skip this, the agent's commands in Step 3 will fail.
+   1. Click **"Set up"**.
+   2. Windows asks for permission — click **"Yes"**.
+   3. **Restart the app**: right-click its taskbar icon → **"Exit"** (the ✕ button is not enough), then open it again. Without this restart, Step 3 will fail.
 
 Already have the app, signed in, sandbox set up? Go to Step 3.
 

@@ -6,11 +6,13 @@ from __future__ import annotations
 import argparse
 import base64
 import getpass
+import hashlib
 import importlib.util
 import json
 import os
 import re
 import shlex
+import shutil
 import subprocess
 import sys
 import time
@@ -34,13 +36,22 @@ CODEX_CLIENT_KEY_ENV = "EZYHUB_CODEX_KEY"
 CODEX_ENV_FILE_NAME = ".env"
 HELPER_PYTHON = "python" if os.name == "nt" else "python3"
 HELPER_COMMAND = f"{HELPER_PYTHON} plugins/ezyhub/scripts/ezyhub_backend.py"
+# Employee-facing resume hints: the plugin runs from Codex's per-version plugin
+# directory, so hints must name this file, not a repo-relative path.
+HELPER_SELF_COMMAND = f'{HELPER_PYTHON} "{Path(__file__).resolve()}"'
 AUTO_SYNC_MARKER = "ezyhub-codex-auto-sync"
 LAUNCHD_LABEL = "com.ezyhub.codex-auto-sync"
 SCHTASKS_TASK_NAME = "EzyHubCodexAutoSync"
+MARKETPLACE_NAME = "ezytrail"
+PLUGIN_NAME = "ezyhub"
+LAUNCHER_NAME = "ezyhub_run.py"
+ONBOARDING_HOOK_ARGS = "ezyhub_onboarding.py session-start-hook"
+ONBOARDING_HOOK_TIMEOUT_SECONDS = 30
 
 
 SECTION_RE = re.compile(r"^\s*\[([A-Za-z0-9_.-]+)\]\s*(?:#.*)?$")
 STRING_VALUE_RE = re.compile(r'^\s*([A-Za-z0-9_.-]+)\s*=\s*"((?:[^"\\]|\\.)*)"\s*(?:#.*)?$')
+HEADER_LINE_RE = re.compile(r"^\s*\[\[?[^\]=]+\]\]?\s*(?:#.*)?$")
 BOOL_VALUE_RE = re.compile(r"^\s*([A-Za-z0-9_.-]+)\s*=\s*(true|false)\s*(?:#.*)?$")
 
 
@@ -617,8 +628,8 @@ def cmd_sync_skills(args: argparse.Namespace) -> None:
         if "HTTP 401" in str(exc):
             raise RuntimeError(
                 f"{exc}\nHint: the EzyHub key in CODEX_HOME/.env was rejected. "
-                f"Re-run enrollment ({HELPER_COMMAND} enroll-backend) or rotate the key "
-                f"({HELPER_COMMAND} key-rotate)."
+                f"Re-run enrollment ({HELPER_SELF_COMMAND} enroll-backend) or rotate the key "
+                f"({HELPER_SELF_COMMAND} key-rotate)."
             ) from exc
         raise
     skills = payload.get("skills")
@@ -711,6 +722,12 @@ def parse_codex_config_strings(text: str) -> dict[str, Any]:
                     current[part] = value
                 current = value
             continue
+        if HEADER_LINE_RE.match(line):
+            # Quoted keys (e.g. [hooks.state."C:\\...\\hooks.json:..."]) or arrays of
+            # tables: not ours to read, but their values must not leak into the
+            # previous section.
+            current = {}
+            continue
         value_match = STRING_VALUE_RE.match(line)
         if value_match:
             key, value = value_match.groups()
@@ -783,6 +800,9 @@ def codex_app_config_status(*, expected_base_url: str, expected_model: str) -> d
     base_url_configured = isinstance(base_url, str) and base_url.rstrip("/") in accepted_base_urls
     requires_openai_auth = active_provider.get("requires_openai_auth") is True
     image_generation_off = features.get("image_generation") is False
+    model_discovery = features.get("api_key_model_discovery") is not False and isinstance(
+        active_provider.get("model_catalog_url"), str
+    )
     ready = bool(
         config_path.exists()
         and credential_configured
@@ -851,6 +871,7 @@ def codex_app_config_status(*, expected_base_url: str, expected_model: str) -> d
             "inline_token_present": inline_token_configured,
             "chatgpt_login": chatgpt_login,
             "image_generation_off": image_generation_off,
+            "model_discovery": model_discovery,
         },
         "missing": sorted(set(missing)),
         "errors": {
@@ -1049,6 +1070,7 @@ def cmd_doctor(args: argparse.Namespace) -> None:
     if args.json:
         payload = dict(report)
         payload["auto_sync"] = auto_sync
+        payload["onboarding_hook"] = onboarding_hook_status()
         print(json.dumps(payload, indent=2, sort_keys=True))
     else:
         print("EzyHub Codex doctor")
@@ -1081,6 +1103,9 @@ def cmd_doctor(args: argparse.Namespace) -> None:
                     print(f"  public_base_url: {payload['public_base_url']}")
         auto_sync_state = "installed" if auto_sync.get("installed") else "not installed"
         print(f"- auto-sync: {auto_sync_state} ({auto_sync.get('platform')})")
+        hook = onboarding_hook_status()
+        hook_state = "not installed" if not hook["installed"] else ("ok" if hook["trusted"] else "installed but not trusted")
+        print(f"- onboarding reminder hook: {hook_state}")
         print(f"Overall: {'ready' if report['ready'] else 'not ready'}")
 
     if args.strict and not report["ready"]:
@@ -1089,6 +1114,282 @@ def cmd_doctor(args: argparse.Namespace) -> None:
 
 def current_platform() -> str:
     return sys.platform
+
+
+def ezyhub_home() -> Path:
+    return Path(os.environ.get("EZYHUB_HOME", str(Path.home() / ".ezyhub"))).expanduser()
+
+
+def plugin_cache_root() -> Path:
+    return codex_home() / "plugins" / "cache" / MARKETPLACE_NAME / PLUGIN_NAME
+
+
+# Scheduled jobs and the onboarding hook call this file instead of a plugin
+# script: Codex keeps the plugin under a per-version directory and deletes old
+# versions on upgrade, so any path into the cache would break on the next release.
+LAUNCHER_SOURCE = """#!/usr/bin/env python3
+\"\"\"EzyHub launcher, managed by the EzyHub Codex plugin. Do not edit.
+
+Runs a script from the newest installed ezyhub@ezytrail plugin version.
+\"\"\"
+import os
+import runpy
+import sys
+from pathlib import Path
+
+SCRIPTS = ("ezyhub_backend.py", "ezyhub_onboarding.py")
+
+
+def version(name):
+    try:
+        return tuple(int(part) for part in name.split("."))
+    except ValueError:
+        return None
+
+
+args = sys.argv[1:]
+script = args.pop(0) if args and args[0] in SCRIPTS else SCRIPTS[0]
+codex_home = Path(os.environ.get("CODEX_HOME") or Path.home() / ".codex").expanduser()
+root = codex_home / "plugins" / "cache" / "ezytrail" / "ezyhub"
+installed = sorted(
+    (version(d.name), d / "scripts" / script)
+    for d in (root.iterdir() if root.is_dir() else [])
+    if version(d.name) and (d / "scripts" / script).is_file()
+)
+if not installed:
+    sys.exit(f"EzyHub plugin not found under {root}")
+path = str(installed[-1][1])
+sys.argv = [path, *args]
+runpy.run_path(path, run_name="__main__")
+"""
+
+
+def write_launcher() -> Path:
+    path = ezyhub_home() / LAUNCHER_NAME
+    if not path.exists() or path.read_text(encoding="utf-8") != LAUNCHER_SOURCE:
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text(LAUNCHER_SOURCE, encoding="utf-8")
+    return path
+
+
+def plugin_installed() -> bool:
+    return any(plugin_cache_root().glob("*/scripts/ezyhub_backend.py"))
+
+
+def auto_sync_entrypoint() -> str:
+    # A dev checkout without the Codex-installed plugin keeps running this file.
+    if plugin_installed():
+        return str(write_launcher())
+    return str(Path(__file__).resolve())
+
+
+def codex_hook_trusted_hash(event: str, group: dict[str, Any]) -> str:
+    """Hash Codex stores in config.toml once a hook is trusted.
+
+    Codex hashes a normalized identity of the handler, not the written JSON
+    (same algorithm as Codex's own trust review; pinned by a test vector).
+    """
+    handler = group["hooks"][0]
+    identity: dict[str, Any] = {
+        "event_name": event,
+        "hooks": [
+            {
+                "async": handler.get("async", False),
+                "command": handler["command"],
+                "timeout": handler.get("timeout", 600),
+                "type": "command",
+            }
+        ],
+    }
+    if group.get("matcher") is not None and event not in ("user_prompt_submit", "stop"):
+        identity["matcher"] = group["matcher"]
+    payload = json.dumps(identity, sort_keys=True, separators=(",", ":"), ensure_ascii=False)
+    return "sha256:" + hashlib.sha256(payload.encode("utf-8")).hexdigest()
+
+
+def onboarding_hook_group(launcher: Path) -> dict[str, Any]:
+    command = f'"{sys.executable}" "{launcher}" {ONBOARDING_HOOK_ARGS}'
+    if os.name == "nt":
+        # Codex runs Windows hooks through PowerShell, where a line starting with a
+        # quoted path is a string, not a call (verified with Codex 0.162).
+        command = "& " + command
+    return {
+        "matcher": "startup",
+        "hooks": [
+            {
+                "type": "command",
+                # Absolute interpreter: a bare "python"/"python3" may hit the Windows
+                # Store alias or the macOS developer-tools install prompt.
+                "command": command,
+                "timeout": ONBOARDING_HOOK_TIMEOUT_SECONDS,
+            }
+        ],
+    }
+
+
+def _is_onboarding_hook_group(group: Any) -> bool:
+    if not isinstance(group, dict) or not isinstance(group.get("hooks"), list):
+        return False
+    return any(
+        isinstance(handler, dict) and ONBOARDING_HOOK_ARGS in str(handler.get("command", ""))
+        for handler in group["hooks"]
+    )
+
+
+HOOK_STATE_HEADER_RE = re.compile(
+    r"""(?m)^\[hooks\.state\.("(?:[^"\\]|\\.)*"|'[^']*')\][ \t]*(?:#[^\n]*)?\n"""
+)
+
+
+def _decode_toml_key(raw: str) -> str:
+    if raw.startswith("'"):
+        return raw[1:-1]
+    return json.loads(raw)
+
+
+def set_hook_trust(config_text: str, key: str, trusted_hash: str) -> str:
+    """Replace (or add) the [hooks.state."<key>"] table in config.toml text."""
+    pieces: list[str] = []
+    pos = 0
+    for match in HOOK_STATE_HEADER_RE.finditer(config_text):
+        if _decode_toml_key(match.group(1)) != key:
+            continue
+        end = re.search(r"(?m)^\[", config_text[match.end():])
+        stop = match.end() + end.start() if end else len(config_text)
+        pieces.append(config_text[pos:match.start()])
+        pos = stop
+    pieces.append(config_text[pos:])
+    text = "".join(pieces).rstrip()
+    configure = load_configure_codex_module()
+    table = (
+        f'[hooks.state."{configure.toml_escape_basic(key)}"]\n'
+        f"enabled = true\n"
+        f'trusted_hash = "{trusted_hash}"\n'
+    )
+    return (text + "\n\n" if text else "") + table
+
+
+def install_onboarding_hook(launcher: Path) -> str:
+    home = codex_home()
+    hooks_path = home / "hooks.json"
+    data: Any = json.loads(hooks_path.read_text(encoding="utf-8")) if hooks_path.exists() else {}
+    if not isinstance(data, dict) or not isinstance(data.setdefault("hooks", {}), dict):
+        raise RuntimeError(f"{hooks_path} is not a Codex hooks file; not touching it")
+    groups = data["hooks"].setdefault("SessionStart", [])
+    if not isinstance(groups, list):
+        raise RuntimeError(f"{hooks_path} has an unexpected SessionStart value; not touching it")
+    group = onboarding_hook_group(launcher)
+    index = next((i for i, g in enumerate(groups) if _is_onboarding_hook_group(g)), None)
+    if index is None:
+        groups.append(group)
+        index = len(groups) - 1
+    elif len(groups[index]["hooks"]) == 1:
+        groups[index] = group
+    else:
+        # Someone added their own handler to our group: leave ours as-is rather
+        # than delete theirs (Codex then asks the user to review the group).
+        return "Onboarding reminder hook shares a group with another hook; left unchanged."
+
+    config_path = home / "config.toml"
+    config_text = config_path.read_text(encoding="utf-8") if config_path.exists() else ""
+    new_config = set_hook_trust(
+        config_text,
+        f"{hooks_path}:session_start:{index}:0",
+        codex_hook_trusted_hash("session_start", group),
+    )
+    try:
+        import tomllib
+    except ImportError:  # Python < 3.11: no validator available
+        tomllib = None
+    if tomllib is not None:
+        try:
+            tomllib.loads(new_config)
+        except tomllib.TOMLDecodeError as exc:
+            raise RuntimeError(f"cannot add hook trust to {config_path} without breaking it: {exc}") from exc
+
+    configure = load_configure_codex_module()
+    # Trust first: a hook without trust is skipped, trust without a hook is inert.
+    if new_config != config_text:
+        configure._atomic_write(config_path, new_config)
+    new_hooks = json.dumps(data, indent=2, ensure_ascii=False) + "\n"
+    if not hooks_path.exists() or hooks_path.read_text(encoding="utf-8") != new_hooks:
+        tmp = hooks_path.with_name(hooks_path.name + ".tmp")
+        tmp.write_text(new_hooks, encoding="utf-8")
+        os.replace(tmp, hooks_path)
+    return "Installed EzyHub onboarding reminder hook."
+
+
+def onboarding_hook_status() -> dict[str, Any]:
+    """Whether the onboarding hook is installed and Codex will trust (run) it."""
+    home = codex_home()
+    hooks_path = home / "hooks.json"
+    try:
+        groups = json.loads(hooks_path.read_text(encoding="utf-8"))["hooks"]["SessionStart"]
+        index = next(i for i, g in enumerate(groups) if _is_onboarding_hook_group(g))
+    except (OSError, ValueError, KeyError, TypeError, StopIteration):
+        return {"installed": False}
+    try:
+        import tomllib
+
+        state = tomllib.loads((home / "config.toml").read_text(encoding="utf-8"))["hooks"]["state"]
+        trusted = state[f"{hooks_path}:session_start:{index}:0"]["trusted_hash"]
+    except Exception:
+        trusted = None
+    return {"installed": True, "trusted": trusted == codex_hook_trusted_hash("session_start", groups[index])}
+
+
+def find_codex_cli() -> str | None:
+    found = shutil.which("codex")
+    if found:
+        return found
+    if os.name == "nt":
+        bin_root = Path(os.environ.get("LOCALAPPDATA", "")) / "OpenAI" / "Codex" / "bin"
+        candidates = sorted(bin_root.glob("*/codex.exe"), key=lambda p: p.stat().st_mtime, reverse=True)
+    else:
+        candidates = [
+            Path("/Applications/Codex.app/Contents/Resources/codex"),
+            Path.home() / "Applications" / "Codex.app" / "Contents" / "Resources" / "codex",
+            Path("/opt/homebrew/bin/codex"),
+            Path("/usr/local/bin/codex"),
+        ]
+    return next((str(c) for c in candidates if c.is_file()), None)
+
+
+def self_update() -> str:
+    """Refresh the ezytrail marketplace; Codex then replaces the installed plugin."""
+    codex = find_codex_cli()
+    if codex is None:
+        return "Plugin update skipped: codex CLI not found."
+    try:
+        result = subprocess.run(
+            [codex, "plugin", "marketplace", "upgrade", MARKETPLACE_NAME],
+            capture_output=True,
+            text=True,
+            timeout=180,
+        )
+    except Exception as exc:
+        return f"Plugin update failed: {exc}"
+    output = (result.stdout or result.stderr or "").strip().splitlines()
+    detail = output[0] if output else f"exit {result.returncode}"
+    if result.returncode != 0:
+        return f"Plugin update failed: {detail}"
+    return f"Plugin update: {detail}"
+
+
+def ensure_local_setup() -> list[str]:
+    """Idempotent per-machine setup that new plugin versions may add over time."""
+    notes: list[str] = []
+    try:
+        if load_configure_codex_module().ensure_model_discovery(codex_home()):
+            notes.append("Enabled company model discovery in Codex config.")
+    except Exception as exc:
+        notes.append(f"warning: model discovery setup failed: {exc}")
+    if plugin_installed():
+        try:
+            notes.append(install_onboarding_hook(write_launcher()))
+        except Exception as exc:
+            notes.append(f"warning: onboarding hook setup failed: {exc}")
+    return notes
 
 
 def build_cron_line(interval_hours: int, helper_path: str, backend_url: str) -> str:
@@ -1212,7 +1513,7 @@ def _uninstall_auto_sync_win32() -> str:
 def install_auto_sync(interval_hours: int, backend_url: str) -> str:
     if not (1 <= interval_hours <= 23):
         raise RuntimeError(f"auto-sync interval hours must be between 1 and 23, got {interval_hours}")
-    helper_path = str(Path(__file__).resolve())
+    helper_path = auto_sync_entrypoint()
     platform = current_platform()
     if platform == "darwin":
         return _install_auto_sync_darwin(interval_hours, helper_path, backend_url)
@@ -1260,6 +1561,45 @@ def cmd_install_auto_sync(args: argparse.Namespace) -> None:
 
 def cmd_uninstall_auto_sync(args: argparse.Namespace) -> None:
     print(uninstall_auto_sync())
+
+
+def run_maintenance() -> None:
+    """Background-sync housekeeping: apply new per-machine setup, then pull plugin updates."""
+    for note in ensure_local_setup():
+        print(note)
+    print(self_update())
+
+
+def remove_legacy_clone() -> str | None:
+    """Delete the ~/.ezyhub/ezyhub-plugin git clone older installs ran from."""
+    clone = ezyhub_home() / "ezyhub-plugin"
+    if not (clone / ".git").is_dir() or not (clone / "plugins" / "ezyhub" / "scripts" / "ezyhub_backend.py").is_file():
+        return None
+    if Path(__file__).resolve().is_relative_to(clone.resolve()) or not plugin_installed():
+        return None
+
+    def make_writable_and_retry(func, path, _exc_info):
+        os.chmod(path, 0o700)  # git marks pack files read-only, which blocks rmtree on Windows
+        func(path)
+
+    shutil.rmtree(clone, onerror=make_writable_and_retry)
+    return f"Removed the old EzyHub install folder {clone} (the plugin now runs from Codex's plugin directory)."
+
+
+def cmd_update(args: argparse.Namespace) -> None:
+    try:
+        cmd_sync_skills(args)
+    except Exception as exc:
+        print(f"warning: skill sync failed: {exc}")
+    for note in ensure_local_setup():
+        print(note)
+    print(install_auto_sync(args.interval_hours, args.backend_url))
+    removed = remove_legacy_clone()
+    if removed:
+        print(removed)
+    # Last: upgrading replaces this version's directory, which the steps above load from.
+    print(self_update())
+    print("EzyHub is up to date. Quit and reopen Codex App to load the new version.")
 
 
 def cmd_key_rotate(args: argparse.Namespace) -> None:
@@ -1317,7 +1657,7 @@ def cmd_enroll_backend(args: argparse.Namespace) -> None:
         path = enroll_session_path()
         if not path.exists():
             raise RuntimeError(
-                f"no pending enroll session found; run '{HELPER_COMMAND} enroll-backend --start' first"
+                f"no pending enroll session found; run '{HELPER_SELF_COMMAND} enroll-backend --start' first"
             )
         created = json.loads(path.read_text())
         _enroll_wait(args, created)
@@ -1325,7 +1665,7 @@ def cmd_enroll_backend(args: argparse.Namespace) -> None:
     created = _enroll_start(args, save_state=bool(getattr(args, "start", False)))
     if getattr(args, "start", False):
         print(
-            f"Enroll session started. After showing the user the link, run: {HELPER_COMMAND} enroll-backend --wait",
+            f"Enroll session started. After showing the user the link, run: {HELPER_SELF_COMMAND} enroll-backend --wait",
             flush=True,
         )
         return
@@ -1378,7 +1718,7 @@ def _enroll_wait(args: argparse.Namespace, created: dict[str, Any]) -> None:
         except Exception:
             print(
                 "Enrollment step failed: skill/MCP sync. Key is already configured. "
-                f"Resume with: {HELPER_COMMAND} sync-skills, then: {HELPER_COMMAND} install-auto-sync"
+                f"Resume with: {HELPER_SELF_COMMAND} sync-skills, then: {HELPER_SELF_COMMAND} install-auto-sync"
             )
             raise
     if not getattr(args, "skip_auto_sync", False):
@@ -1386,8 +1726,10 @@ def _enroll_wait(args: argparse.Namespace, created: dict[str, Any]) -> None:
             summary = install_auto_sync(args.auto_sync_interval_hours, args.backend_url)
             print(summary)
         except Exception:
-            print(f"Enrollment step failed: auto-sync install. Resume with: {HELPER_COMMAND} install-auto-sync")
+            print(f"Enrollment step failed: auto-sync install. Resume with: {HELPER_SELF_COMMAND} install-auto-sync")
             raise
+    for note in ensure_local_setup():
+        print(note)
     role = result.get("role")
     print(f"Enrolled{f' with role {role}' if role else ''}. Quit and reopen Codex App to pick up the new configuration.")
 
@@ -1449,6 +1791,8 @@ def parse_args() -> argparse.Namespace:
     install_auto_sync_parser = sub.add_parser("install-auto-sync")
     install_auto_sync_parser.add_argument("--interval-hours", type=int, default=4)
     sub.add_parser("uninstall-auto-sync")
+    update = sub.add_parser("update", help="one-time migration for older installs: update the plugin and re-point background jobs")
+    update.add_argument("--interval-hours", type=int, default=4)
     return parser.parse_args()
 
 
@@ -1458,7 +1802,11 @@ def main() -> int:
         if args.command == "status":
             cmd_status(args)
         elif args.command == "sync-skills":
-            cmd_sync_skills(args)
+            try:
+                cmd_sync_skills(args)
+            finally:
+                # Even when sync fails (e.g. a rejected key), still pull plugin fixes.
+                run_maintenance()
         elif args.command == "publish-skill":
             cmd_publish_skill(args)
         elif args.command == "configure-codex-app-kb-token":
@@ -1481,6 +1829,8 @@ def main() -> int:
             cmd_install_auto_sync(args)
         elif args.command == "uninstall-auto-sync":
             cmd_uninstall_auto_sync(args)
+        elif args.command == "update":
+            cmd_update(args)
         else:
             raise RuntimeError(f"unknown command {args.command}")
     except Exception as exc:

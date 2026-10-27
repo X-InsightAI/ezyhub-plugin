@@ -177,16 +177,17 @@ def remove_previous_ezyhub_auth_key(codex_home: Path, key: str) -> bool:
     return True
 
 
-def merge_features_image_off(text: str) -> str:
+def set_feature(text: str, name: str, value: bool) -> str:
+    line = f"{name} = {'true' if value else 'false'}"
     m = re.search(r"(?ms)^\[features\][ \t]*(?:#[^\n]*)?\n(.*?)(?=^\[[^\n]+\]\n|\Z)", text)
     if m is None:
-        block = "[features]\nimage_generation = false\n"
-        return text.rstrip() + "\n\n" + block
+        return text.rstrip() + "\n\n[features]\n" + line + "\n"
     body = m.group(1)
-    if re.search(r"(?m)^\s*image_generation\s*=", body):
-        body = re.sub(r"(?m)^\s*image_generation\s*=.*$", "image_generation = false", body, count=1)
+    pattern = rf"(?m)^\s*{re.escape(name)}\s*=.*$"
+    if re.search(pattern, body):
+        body = re.sub(pattern, line, body, count=1)
     else:
-        body = body.rstrip() + "\nimage_generation = false\n"
+        body = body.rstrip() + "\n" + line + "\n"
     return text[: m.start(1)] + body + text[m.end(1):]
 
 
@@ -204,6 +205,7 @@ def _render_provider(provider_id: str, base_url: str, key: str) -> str:
         f'wire_api = "responses"\n'
         f'experimental_bearer_token = "{toml_escape_basic(key)}"\n'
         f"requires_openai_auth = true\n"
+        f'model_catalog_url = "{base_url.rstrip("/")}/models"\n'
     )
 
 
@@ -237,10 +239,56 @@ def merge_config(codex_home: Path, base_url: str, model: str, key: str) -> Path:
     text = strip_provider_section(text, provider_id)
     text = set_top_level_string(text, "model_provider", provider_id)
     text = set_top_level_string(text, "model", model)
-    text = merge_features_image_off(text)
+    text = set_feature(text, "image_generation", False)
+    # Let Codex list every gateway model (from model_catalog_url) in its picker.
+    text = set_feature(text, "api_key_model_discovery", True)
     text = text.rstrip() + _render_provider(provider_id, base_url, key)
     _atomic_write(config_path, text.rstrip() + "\n")
     return config_path
+
+
+def set_provider_string(text: str, provider_id: str, field: str, value: str) -> str:
+    m = re.search(
+        rf"(?ms)^\[model_providers\.{re.escape(provider_id)}\][ \t]*(?:#[^\n]*)?\n(.*?)(?=^\[[^\n]+\]\n|\Z)",
+        text,
+    )
+    if m is None:
+        return text
+    line = f'{field} = "{toml_escape_basic(value)}"'
+    body = m.group(1)
+    pattern = rf"(?m)^\s*{re.escape(field)}\s*=.*$"
+    if re.search(pattern, body):
+        body = re.sub(pattern, lambda _: line, body, count=1)
+    else:
+        body = body.rstrip("\n") + "\n" + line + "\n"
+        if m.end(1) < len(text):
+            body += "\n"
+    return text[: m.start(1)] + body + text[m.end(1):]
+
+
+def ensure_model_discovery(codex_home: Path) -> bool:
+    """Enable gateway model discovery on an existing EzyHub config, in place.
+
+    Unlike merge_config this never rewrites the provider or the user's model.
+    Returns True when config.toml changed.
+    """
+    config_path = codex_home / "config.toml"
+    if not config_path.exists():
+        return False
+    text = config_path.read_text(encoding="utf-8")
+    active = _top_level_value(text, "model_provider")
+    if not active:
+        return False
+    section = _provider_section(text, active)
+    if section is None or select_retained_provider(text) != active:
+        return False
+    base_url = (_section_field(section, "base_url") or DEFAULT_BASE_URL).rstrip("/")
+    updated = set_feature(text, "api_key_model_discovery", True)
+    updated = set_provider_string(updated, active, "model_catalog_url", f"{base_url}/models")
+    if updated == text:
+        return False
+    _atomic_write(config_path, updated)
+    return True
 
 
 def parse_args() -> argparse.Namespace:

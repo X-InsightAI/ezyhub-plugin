@@ -143,23 +143,21 @@ codex plugin add ezyhub@ezytrail
 
 **Step 3 — Enroll**
 
-Run the enroll helper from the clone of this repository (clone it now if you haven't already). The clone must be at a persistent location such as `~/.ezyhub/ezyhub-plugin` (Windows: `C:\Users\<username>\.ezyhub\ezyhub-plugin`; `%USERPROFILE%` does not expand in PowerShell), not a temporary directory: the auto-sync job installed at the end records this path and keeps running the helper from it.
+Run the enroll helper from the **installed plugin**, not from the clone (the clone is only for reading these instructions). `codex plugin add` printed `Installed plugin root: <path>`; that directory contains `scripts/`. If you missed it, it is the highest version directory under `~/.codex/plugins/cache/ezytrail/ezyhub/` (Windows: `C:\Users\<username>\.codex\plugins\cache\ezytrail\ezyhub\`). Below, `<plugin-root>` means that directory.
 
 Enrollment is **two commands**, in this order:
 
 ```bash
-git clone --depth 1 https://github.com/X-InsightAI/ezyhub-plugin ~/.ezyhub/ezyhub-plugin
-cd ~/.ezyhub/ezyhub-plugin
-python3 plugins/ezyhub/scripts/ezyhub_backend.py enroll-backend --start
+python3 "<plugin-root>/scripts/ezyhub_backend.py" enroll-backend --start
 ```
 
 `--start` returns immediately: it opens the browser and prints the `AUTHORIZATION LINK`. **Stop and paste that link into your chat reply now** (see the REQUIRED bullet below). Only after your reply shows the link, run:
 
 ```bash
-python3 plugins/ezyhub/scripts/ezyhub_backend.py enroll-backend --wait
+python3 "<plugin-root>/scripts/ezyhub_backend.py" enroll-backend --wait
 ```
 
-`--wait` waits for the user to authorize (up to 10 minutes) and then finishes everything on its own: configures the Codex provider and key, syncs role skills, and installs the background auto-sync job. Do not run plain `enroll-backend` (without flags) — it blocks until authorization and you will not see the link in time to show the user.
+`--wait` waits for the user to authorize (up to 10 minutes) and then finishes everything on its own: configures the Codex provider and key, syncs role skills, installs the background auto-sync job (which also keeps the plugin updated), and installs the onboarding reminder for Google Workspace and DingTalk. Do not run plain `enroll-backend` (without flags) — it blocks until authorization and you will not see the link in time to show the user.
 
 Guide the user through the browser step in plain language:
 
@@ -172,7 +170,7 @@ If enrollment fails partway after the key is configured, the helper prints the e
 **Step 4 — Verify**
 
 ```bash
-python3 plugins/ezyhub/scripts/ezyhub_backend.py doctor
+python3 "<plugin-root>/scripts/ezyhub_backend.py" doctor
 ```
 
 This live-tests the enrolled key against the company model gateway (the `gateway` check) and confirms the key backend is reachable and auto-sync is installed. All employee-facing checks should pass; admin-only checks report "skipped" — that is normal.
@@ -190,14 +188,25 @@ Once installed, these skills are available in Codex App:
 | `/enroll` | Enroll this machine with the company gateway (browser sign-in, key issue, skill + MCP sync, auto-sync install) |
 | `/key-status` | Show current enrollment status and key metadata |
 | `/sync-skills` | Sync role-based company skills into the local Codex skills directory |
+| `/onboarding` | Connect your company Google Workspace (Gmail, Drive, Sheets, Docs, Calendar) and DingTalk accounts; until both work, every new chat starts with a reminder |
+| `/update` | Update the plugin now; also moves installs from before version 1.0.14 onto the current setup |
 
 ## Updating
 
-```bash
-codex plugin add ezyhub@ezytrail
+Updates install themselves: the background job (default: every 4 hours) syncs role skills and runs `codex plugin marketplace upgrade ezytrail`. Quit and reopen Codex App to load a new version.
+
+Installs from before version 1.0.14 need one manual update. Paste this into a new Codex chat, then quit and reopen Codex App when it is done:
+
+```text
+Update the EzyHub plugin. Using shell commands only (no web search):
+1. Run: codex plugin marketplace upgrade ezytrail
+   (Windows: codex is usually not on PATH; use the newest %LOCALAPPDATA%\OpenAI\Codex\bin\<version>\codex.exe by full path.)
+2. Run the update helper from the newest version folder under ~/.codex/plugins/cache/ezytrail/ezyhub/:
+   python3 ~/.codex/plugins/cache/ezytrail/ezyhub/<newest version>/scripts/ezyhub_backend.py update
+   (Windows: python "C:\Users\<username>\.codex\plugins\cache\ezytrail\ezyhub\<newest version>\scripts\ezyhub_backend.py" update)
 ```
 
-Then open a new Codex thread. Role skills also refresh automatically in the background (default: every 4 hours).
+From 1.0.14 on, saying **"Update EzyHub"** (or `/update`) in a chat does the same.
 
 ## How it works
 

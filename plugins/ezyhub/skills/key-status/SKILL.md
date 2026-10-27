@@ -9,8 +9,10 @@ Show EzyHub Codex status.
 
 Run:
 
+`<plugin-root>` below is the directory two levels above this `SKILL.md` (the one containing `scripts/`).
+
 ```bash
-python3 plugins/ezyhub/scripts/ezyhub_backend.py status
+python3 "<plugin-root>/scripts/ezyhub_backend.py" status
 ```
 
 The script calls:

@@ -21,10 +21,12 @@ macOS/Linux or `python` on Windows.
 
 **Agents must run it as two commands** (a blocking one-shot run holds the authorization link hostage until it exits — you would never get to show it):
 
+`<plugin-root>` below is the directory two levels above this `SKILL.md` (the one containing `scripts/`).
+
 ```bash
-python3 plugins/ezyhub/scripts/ezyhub_backend.py enroll-backend --start
+python3 "<plugin-root>/scripts/ezyhub_backend.py" enroll-backend --start
 # returns immediately; paste the printed AUTHORIZATION LINK into your chat reply, then:
-python3 plugins/ezyhub/scripts/ezyhub_backend.py enroll-backend --wait
+python3 "<plugin-root>/scripts/ezyhub_backend.py" enroll-backend --wait
 ```
 
 `--start` creates the session, opens the browser, prints the link, and exits. `--wait` resumes that session: it waits for authorization (up to 10 minutes) and then runs the rest of the chain (configure, sync, auto-sync). Plain `enroll-backend` without flags still does everything in one blocking run — fine for a human at a terminal, wrong for agents.
@@ -63,7 +65,8 @@ What happens after the browser step completes:
 
 1. Codex provider/key are configured (see "Mixed-auth provider config" below).
 2. Role skills are synced (same as `/sync-skills`; see `plugins/ezyhub/skills/sync-skills/SKILL.md` for collision rules). Skip with `--skip-sync-skills`.
-3. A background job is installed that re-runs the sync automatically, default every 4 hours. Skip with `--skip-auto-sync`, change the interval with `--auto-sync-interval-hours <n>`.
+3. A background job is installed that re-runs the sync automatically, default every 4 hours. Skip with `--skip-auto-sync`, change the interval with `--auto-sync-interval-hours <n>`. The job runs `~/.ezyhub/ezyhub_run.py`, a small launcher that always starts the newest installed plugin version, and each run also updates the plugin (`codex plugin marketplace upgrade ezytrail`).
+4. The onboarding reminder hook is installed: until the employee's Google Workspace and DingTalk logins work, every new conversation starts with a reminder (see the `onboarding` skill). Onboarding is a separate step; enrollment does not wait for it.
 
 If step 2 or 3 fails after the key is already configured, the helper prints a resume command (`sync-skills` or `install-auto-sync`) rather than leaving the employee stuck mid-flow.
 
@@ -76,7 +79,7 @@ Do not use IP addresses in employee/plugin backend URLs.
 If the key backend is running in dev mode, use the same one-shot command with `--dev-complete` instead of a real Google login:
 
 ```bash
-python3 plugins/ezyhub/scripts/ezyhub_backend.py enroll-backend --dev-complete
+python3 "<plugin-root>/scripts/ezyhub_backend.py" enroll-backend --dev-complete
 ```
 
 This exercises the same enroll session/result path that production Google OAuth will use, but completes the session with a local dev identity. It still runs the full chain above (config, skill/MCP sync, auto-sync install). The key must be issued by the key backend. If `CLIPROXY_MANAGEMENT_KEY` is configured on key-backend, the backend generates a fresh CLIProxyAPI client key and adds it to CLIProxyAPI through the management API. Do not read an existing client key from WSL or any other local Codex client.
@@ -101,6 +104,7 @@ model = "gpt-5.6-sol"
 
 [features]
 image_generation = false
+api_key_model_discovery = true
 
 [model_providers.ezyapis]
 name = "EzyHub"
@@ -108,7 +112,11 @@ base_url = "https://api.ezyapis.com/v1"
 wire_api = "responses"
 experimental_bearer_token = "<employee key>"
 requires_openai_auth = true
+model_catalog_url = "https://api.ezyapis.com/v1/models"
 ```
+
+`api_key_model_discovery` plus the provider's `model_catalog_url` make Codex list every
+model the company gateway offers in its model picker.
 
 The employee key is also stored in `CODEX_HOME/.env` as `EZYHUB_CODEX_KEY` for
 helper commands; the managed provider section carries the inline token and no
@@ -126,8 +134,8 @@ When configuring Codex, the helper:
   old `env_key` or stale inline token lines)
 - removes the other managed provider sections (`company`, `ezyapis`, `ezyhub`
   — whichever are not the retained id)
-- sets `model = "gpt-5.6-sol"` and `image_generation = false` under
-  `[features]`
+- sets `model = "gpt-5.6-sol"`, and `image_generation = false` plus
+  `api_key_model_discovery = true` under `[features]`
 - leaves unrelated providers, MCP servers, and MCP `bearer_token_env_var`
   settings alone
 

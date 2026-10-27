@@ -11,8 +11,10 @@ Sync company-managed role skills.
 
 Run:
 
+`<plugin-root>` below is the directory two levels above this `SKILL.md` (the one containing `scripts/`).
+
 ```bash
-python3 plugins/ezyhub/scripts/ezyhub_backend.py sync-skills
+python3 "<plugin-root>/scripts/ezyhub_backend.py" sync-skills
 ```
 
 The script calls:
@@ -41,7 +43,7 @@ Open a new Codex App thread after syncing.
 To submit a local skill to the company library for your role:
 
 ```bash
-python3 plugins/ezyhub/scripts/ezyhub_backend.py publish-skill <local-skill-dir> --role <role>
+python3 "<plugin-root>/scripts/ezyhub_backend.py" publish-skill <local-skill-dir> --role <role>
 ```
 
 This uploads the skill directory (must contain a `SKILL.md`; symlinks are rejected) to a pending area on the backend. The skill name defaults to the directory name and must start with `ezyhub-`; pass `--name ezyhub-<slug>` to override. An admin reviews and approves the submission before it appears in the company library and reaches other employees via sync.

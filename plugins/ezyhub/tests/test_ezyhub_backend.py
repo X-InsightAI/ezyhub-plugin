@@ -2189,3 +2189,44 @@ def test_check_gateway_key_not_ready_when_model_unavailable(tmp_path, monkeypatc
     result = helper.check_gateway_key()
     assert result["ok"] is False
     assert "gpt-5.6-sol" in result["reason"]
+
+
+def test_merge_config_enables_model_discovery_on_retained_provider(tmp_path):
+    import tomllib
+
+    configure = load_configure_helper()
+    home = tmp_path / "codex"
+    _write(home / "config.toml",
+        'model_provider = "work"\n\n'
+        '[features]\n'
+        'web_search = true\n'
+        'api_key_model_discovery = false\n\n'
+        '[model_providers.work]\n'
+        'name = "EzyHub"\n'
+        'base_url = "https://api.ezyapis.com/v1"\n'
+    )
+    configure.merge_config(home, "https://api.ezyapis.com/v1", "gpt-5.6-sol", "sk-ezyhub-d-1")
+    configure.merge_config(home, "https://api.ezyapis.com/v1", "gpt-5.6-sol", "sk-ezyhub-d-1")
+    text = (home / "config.toml").read_text()
+    parsed = tomllib.loads(text)
+    assert parsed["features"]["api_key_model_discovery"] is True
+    assert parsed["features"]["image_generation"] is False
+    assert parsed["features"]["web_search"] is True
+    assert parsed["model_providers"]["work"]["model_catalog_url"] == "https://api.ezyapis.com/v1/models"
+    assert text.count("api_key_model_discovery") == 1
+    assert text.count("model_catalog_url") == 1
+
+
+def test_codex_app_config_status_reports_model_discovery(tmp_path, monkeypatch):
+    helper = load_helper()
+    configure = load_configure_helper()
+    home = tmp_path / "codex"
+    configure.merge_config(home, "https://api.ezyapis.com/v1", "gpt-5.6-sol", "sk-ezyhub-d-2")
+    monkeypatch.setattr(helper, "codex_home", lambda: home)
+
+    status = helper.codex_app_config_status(
+        expected_base_url="https://api.ezyapis.com/v1",
+        expected_model="gpt-5.6-sol",
+    )
+
+    assert status["observed"]["model_discovery"] is True
